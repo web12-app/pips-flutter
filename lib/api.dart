@@ -50,7 +50,7 @@ class PipsApi {
 
   static Map<String, String> get _headers => {
         if (session != null && session!.isNotEmpty) 'Cookie': 'pips_session=$session',
-        'User-Agent': 'PipsApp/3.6 (Flutter)',
+        'User-Agent': 'PipsApp/3.7 (Flutter)',
       };
 
   static Map<String, String> get authHeaders => _headers;
@@ -176,6 +176,17 @@ class PipsApi {
   static Future<Map<String, dynamic>> filesTree([String? folder]) =>
       _req('GET', '$api/files/tree${folder != null && folder.isNotEmpty ? '?folder=${enc(folder)}' : ''}');
   static Future<List<dynamic>> filesTrash() async => _arr(await _exec('GET', '$api/files/trash'));
+
+  /// Queue a server-side import: the backend fetches `url` in the background
+  /// and stores the file in Pips cloud — safe to close the app right after.
+  /// Returns the pending entry ({id, name, size, import_status: importing}).
+  static Future<Map<String, dynamic>> importUrl(String url, {String vis = 'public'}) =>
+      _req('POST', '$api/v1/files/import-url', {'url': url, 'visibility': vis});
+
+  /// Full metadata for one file (includes import_status while importing).
+  static Future<Map<String, dynamic>> fileInfo(String id) =>
+      _req('GET', '$api/files/info?id=${enc(id)}');
+
   static Future<void> trashRestore(String id) => _req('POST', '$api/files/trash/restore', {'id': id});
   static Future<void> trashPurge(String id) => _req('POST', '$api/files/trash/purge', {'id': id});
   static Future<Map<String, dynamic>> search(String q, [String? type]) =>

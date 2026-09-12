@@ -1,9 +1,8 @@
+import 'dart:async';
 import 'dart:io';
 import 'dart:math';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
-import 'package:http/http.dart' as http;
-import 'package:path_provider/path_provider.dart';
 import '../api.dart';
 import '../models.dart';
 import '../services/notifications.dart';
@@ -13,13 +12,120 @@ class UploadQueue extends ChangeNotifier {
   static final instance = UploadQueue._();
   UploadQueue._();
   final jobs = <UploadJob>[];
+  final imports = <ServerImport>[];
+  Timer? _importTimer;
+
   void add(UploadJob j) {
     PipsNotify.i.requestPermission(); // Android 13+ POST_NOTIFICATIONS
     jobs.insert(0, j);
     notifyListeners();
     j.run(notifyListeners);
   }
+
   void clearFinished() { jobs.removeWhere((j) => j.done || j.failed); notifyListeners(); }
+
+  /// Track a server-side URL import and poll its status until done/failed.
+  void trackImport(ServerImport im) {
+    PipsNotify.i.requestPermission();
+    imports.insert(0, im);
+    notifyListeners();
+    _pollImports();
+  }
+
+  void removeImport(ServerImport im) {
+    imports.remove(im);
+    notifyListeners();
+  }
+
+  void _pollImports() {
+    if (_importTimer != null) return;
+    _importTimer = Timer.periodic(const Duration(seconds: 3), (_) async {
+      final active = imports.where((i) => i.active).toList();
+      if (active.isEmpty) {
+        _importTimer?.cancel();
+        _importTimer = null;
+        return;
+      }
+      var changed = false;
+      for (final im in active) {
+        try {
+          final f = await PipsApi.fileInfo(im.id);
+          final st = (f['import_status'] ?? '').toString();
+          if (st == 'done') {
+            im
+              ..status = 'done'
+              ..size = int.tryParse('${f['size'] ?? 0}') ?? im.size;
+            changed = true;
+          } else if (st == 'failed') {
+            final msg = f['import_error'];
+            im
+              ..status = 'failed'
+              ..error = (msg is String && msg.isNotEmpty) ? msg : 'Import failed';
+            changed = true;
+          } else if (im.size == 0) {
+            final s = int.tryParse('${f['size'] ?? 0}') ?? 0;
+            if (s > 0) {
+              im.size = s;
+              changed = true;
+            }
+          }
+        } catch (_) {}
+      }
+      if (changed) notifyListeners();
+    });
+  }
+}
+
+/// A server-side URL import queued on the Pips backend — the backend worker
+/// fetches the file from the source URL, so the import keeps running even if
+/// the app is closed or the phone goes offline.
+class ServerImport {
+  final String id;
+  final String name;
+  int size;
+  String status; // importing | done | failed
+  String? error;
+  ServerImport({required this.id, required this.name, required this.size, required this.status, this.error});
+  bool get active => status == 'importing';
+}
+
+/// Card shown for server-side URL imports (Uploads tab + Add-new-files sheet).
+Widget importCard(BuildContext context, ServerImport im, {VoidCallback? onRemove}) {
+  final (icon, color) = _UploadSheetState.iconFor(im.name);
+  final tone = im.status == 'failed' ? AppTheme.red : (im.status == 'done' ? AppTheme.green : AppTheme.blue);
+  final sub = [
+    if (im.size > 0) fmtBytes(im.size),
+    'from URL',
+    im.status == 'importing'
+        ? 'Importing on Pips cloud…'
+        : im.status == 'done'
+            ? 'Imported ✓'
+            : (im.error ?? 'Import failed'),
+  ].join(' · ');
+  return Container(
+    margin: const EdgeInsets.only(top: 8),
+    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+    decoration: BoxDecoration(color: const Color(0xFFF8FAFC), borderRadius: BorderRadius.circular(13), border: Border.all(color: const Color(0xFFE8EEF6))),
+    child: Row(children: [
+      IconTile(icon: icon, bg: color.withValues(alpha: 0.14), fg: color, size: 36),
+      const SizedBox(width: 10),
+      Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Text(im.name, maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 13)),
+        const SizedBox(height: 2),
+        Text(sub, maxLines: 1, overflow: TextOverflow.ellipsis, style: TextStyle(fontSize: 11, color: im.status == 'failed' ? AppTheme.red : Colors.grey)),
+      ])),
+      if (im.active)
+        const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2))
+      else ...[
+        const SizedBox(width: 6),
+        Icon(im.status == 'done' ? Icons.check_circle : Icons.error_outline, size: 19, color: tone),
+        if (onRemove != null) ...[
+          const SizedBox(width: 6),
+          GestureDetector(onTap: onRemove, child: const Icon(Icons.close, size: 18, color: Colors.grey)),
+        ],
+      ],
+    ]),
+  );
 }
 
 class UploadJob {
@@ -93,9 +199,17 @@ class UploadsPage extends StatelessWidget {
             appBar: AppBar(title: const Text('File Upload'), actions: [
               TextButton(onPressed: canClear ? UploadQueue.instance.clearFinished : null, child: const Text('Clear finished')),
             ]),
-            body: jobs.isEmpty
+            body: jobs.isEmpty && UploadQueue.instance.imports.isEmpty
                 ? const EmptyState(icon: '⬆️', text: 'Nothing here yet.\nTap + to pick a file.')
                 : ListView(padding: const EdgeInsets.all(14), children: [
+                    if (UploadQueue.instance.imports.isNotEmpty) ...[
+                      Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
+                        const Text('Cloud imports (URL)', style: TextStyle(fontWeight: FontWeight.w800, fontSize: 15)),
+                        Text('${UploadQueue.instance.imports.where((i) => i.active).length} importing', style: const TextStyle(fontSize: 12, color: Colors.grey)),
+                      ]),
+                      ...UploadQueue.instance.imports.map((im) => importCard(context, im)),
+                      const SizedBox(height: 14),
+                    ],
                     if (active.isNotEmpty) ...[
                       Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
                         const Text('In Progress', style: TextStyle(fontWeight: FontWeight.w800, fontSize: 15)),
@@ -176,7 +290,7 @@ class _UploadSheetState extends State<UploadSheet> {
 
   static const _mimes = {'pdf': 'application/pdf', 'png': 'image/png', 'jpg': 'image/jpeg', 'jpeg': 'image/jpeg', 'gif': 'image/gif', 'webp': 'image/webp', 'mp4': 'video/mp4', 'mov': 'video/quicktime', 'mkv': 'video/x-matroska', 'avi': 'video/x-msvideo', 'mp3': 'audio/mpeg', 'wav': 'audio/wav', 'm4a': 'audio/mp4', 'zip': 'application/zip', 'rar': 'application/vnd.rar', '7z': 'application/x-7z-compressed', 'txt': 'text/plain', 'json': 'application/json', 'csv': 'text/csv', 'doc': 'application/msword', 'docx': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document', 'xls': 'application/vnd.ms-excel', 'xlsx': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'};
 
-  static (IconData, Color) _iconFor(String name) {
+  static (IconData, Color) iconFor(String name) {
     final ext = name.contains('.') ? name.split('.').last.toLowerCase() : '';
     if (['png', 'jpg', 'jpeg', 'gif', 'webp', 'heic'].contains(ext)) return (Icons.image_outlined, AppTheme.purple);
     if (['mp4', 'mov', 'mkv', 'avi', 'webm'].contains(ext)) return (Icons.movie_outlined, AppTheme.teal);
@@ -226,38 +340,37 @@ class _UploadSheetState extends State<UploadSheet> {
       toast(context, 'Enter a valid URL.');
       return;
     }
-    final seg = uri.pathSegments.where((s) => s.isNotEmpty).toList();
-    final name = seg.isNotEmpty ? Uri.decodeComponent(seg.last) : 'import-${DateTime.now().millisecondsSinceEpoch}';
-    final ext = name.contains('.') ? name.split('.').last.toLowerCase() : '';
-    final entry = _Pick(path: '', name: name, size: 0, mime: _mimes[ext] ?? 'application/octet-stream', isUrl: true, fetching: true);
-    setState(() {
-      items.add(entry);
-      urlCtrl.clear();
-    });
+    setState(() => busy = true);
     try {
-      final resp = await http.get(uri).timeout(const Duration(seconds: 90));
-      if (resp.statusCode >= 400) throw Exception('http ${resp.statusCode}');
-      final dir = await getTemporaryDirectory();
-      final safe = name.replaceAll(RegExp(r'[^\w.\- ]'), '_');
-      final f = File('${dir.path}/pips-url-${DateTime.now().millisecondsSinceEpoch}-$safe');
-      await f.writeAsBytes(resp.bodyBytes);
+      // Server-side import: the backend fetches the URL in the background and
+      // stores the file in Pips cloud — the phone can go offline right away.
+      final entry = await PipsApi.importUrl(raw, vis: vis);
       if (!mounted) return;
-      setState(() {
-        entry
-          ..path = f.path
-          ..size = resp.bodyBytes.length
-          ..fetching = false;
-      });
+      final st = entry['import_status'];
+      UploadQueue.instance.trackImport(ServerImport(
+        id: (entry['id'] ?? '').toString(),
+        name: (entry['name'] ?? 'import').toString(),
+        size: int.tryParse('${entry['size'] ?? 0}') ?? 0,
+        status: st is String && st.isNotEmpty ? st : 'importing',
+        error: entry['import_error'] is String ? entry['import_error'] as String : null,
+      ));
+      setState(() => urlCtrl.clear());
+      toast(context, 'Import queued on the server — safe to close the app.');
+    } on ApiException catch (e) {
+      if (mounted) toast(context, e.message);
     } catch (_) {
-      if (!mounted) return;
-      setState(() => items.remove(entry));
-      toast(context, 'Could not fetch that URL.');
+      if (mounted) toast(context, 'Could not start that import.');
+    } finally {
+      if (mounted) setState(() => busy = false);
     }
   }
 
   void upload() {
     final ready = items.where((e) => !e.fetching && e.path.isNotEmpty).toList();
-    if (ready.isEmpty) return;
+    if (ready.isEmpty) {
+      if (UploadQueue.instance.imports.isNotEmpty) setState(() => started = true);
+      return;
+    }
     for (final e in ready) {
       UploadQueue.instance.add(UploadJob(path: e.path, name: e.name, mime: e.mime, vis: vis, folder: folder, size: e.size));
     }
@@ -295,6 +408,10 @@ class _UploadSheetState extends State<UploadSheet> {
             if (items.isNotEmpty) ...[
               const SizedBox(height: 14),
               ...items.map(_pickCard),
+            ],
+            if (UploadQueue.instance.imports.isNotEmpty) ...[
+              const SizedBox(height: 6),
+              ...UploadQueue.instance.imports.map((im) => importCard(context, im, onRemove: im.active ? null : () => UploadQueue.instance.removeImport(im))),
             ],
             const SizedBox(height: 16),
             Row(children: const [
@@ -367,7 +484,7 @@ class _UploadSheetState extends State<UploadSheet> {
               )),
               const SizedBox(width: 10),
               Expanded(child: FilledButton(
-                onPressed: items.any((e) => !e.fetching && e.path.isNotEmpty) ? upload : null,
+                onPressed: (items.any((e) => !e.fetching && e.path.isNotEmpty) || UploadQueue.instance.imports.isNotEmpty) ? upload : null,
                 style: FilledButton.styleFrom(padding: const EdgeInsets.symmetric(vertical: 13), shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12))),
                 child: Text('Upload${items.isEmpty ? '' : ' (${items.length})'}', style: const TextStyle(fontWeight: FontWeight.w700)),
               )),
@@ -420,7 +537,7 @@ class _UploadSheetState extends State<UploadSheet> {
       );
 
   Widget _pickCard(_Pick e) {
-    final (icon, color) = _iconFor(e.name);
+    final (icon, color) = iconFor(e.name);
     return Container(
       margin: const EdgeInsets.only(top: 8),
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
@@ -450,11 +567,15 @@ class _UploadSheetState extends State<UploadSheet> {
           builder: (_, __) {
             final jobs = UploadQueue.instance.jobs;
             final active = jobs.where((j) => !j.done && !j.failed).toList();
+            final imps = UploadQueue.instance.imports;
+            final title = active.isEmpty
+                ? 'Importing from URL…'
+                : 'Uploading ${active.length} ${active.length == 1 ? 'file' : 'files'}…';
             return Padding(
               padding: const EdgeInsets.fromLTRB(20, 16, 20, 20),
               child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.stretch, children: [
                 Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
-                  Text('Uploading ${active.isEmpty ? '' : '${active.length} '}${active.length == 1 ? 'file' : 'files'}…', style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 17)),
+                  Text(title, style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 17)),
                   TextButton(
                     onPressed: () => Navigator.pop(context),
                     child: const Text('Hide', style: TextStyle(fontWeight: FontWeight.w700)),
@@ -463,12 +584,13 @@ class _UploadSheetState extends State<UploadSheet> {
                 Flexible(
                   child: ListView.builder(
                     shrinkWrap: true,
-                    itemCount: jobs.length,
+                    itemCount: jobs.length + imps.length,
                     itemBuilder: (_, i) {
-                      final j = jobs[i];
+                      if (i < imps.length) return importCard(context, imps[i]);
+                      final j = jobs[i - imps.length];
                       final left = j.minutesLeft;
                       final color = j.failed ? AppTheme.red : (j.done ? AppTheme.green : AppTheme.blue);
-                      final (icon, ic) = _iconFor(j.name);
+                      final (icon, ic) = iconFor(j.name);
                       final sub = [
                         fmtBytes(j.size),
                         j.status,
@@ -525,7 +647,7 @@ class _UploadSheetState extends State<UploadSheet> {
       context: context,
       builder: (ctx) => AlertDialog(
         title: const Text('Need help with uploads?'),
-        content: const Text('Pick files from your gallery or documents, or paste a direct file URL under "Import from URL". Files larger than 4 MB upload in chunks automatically and continue in the background.'),
+        content: const Text('Pick files from your gallery or documents, or paste a direct file URL under "Import from URL" — URL imports run on the Pips server, so they keep going even if you close the app or go offline. Files larger than 4 MB upload in chunks automatically and continue in the background.'),
         actions: [
           TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Close')),
           FilledButton(
