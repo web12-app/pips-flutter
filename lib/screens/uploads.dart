@@ -25,8 +25,20 @@ class UploadJob {
   final int size;
   double progress = 0;
   String status = 'Uploading…';
-  bool done = false, failed = false;
+  bool done = false, failed = false, cancelled = false;
+  DateTime started = DateTime.now();
   UploadJob({required this.path, required this.name, required this.mime, required this.vis, required this.folder, required this.size});
+
+  /// Rough ETA in whole minutes based on elapsed time and progress (null while unknown).
+  int? get minutesLeft {
+    if (progress <= 0.02 || done || failed) return null;
+    final elapsed = DateTime.now().difference(started).inSeconds;
+    final total = elapsed / progress;
+    final left = ((total - elapsed) / 60).ceil();
+    return left < 1 ? 1 : left;
+  }
+
+  void cancel() => cancelled = true;
 
   Future<void> run(void Function() notify) async {
     final nkey = 'up-$path-$name';
@@ -43,6 +55,7 @@ class UploadJob {
         final total = (size + PipsApi.chunkSize - 1) ~/ PipsApi.chunkSize;
         var doneParts = await PipsApi.uploadStatus(id); // resume support
         for (var i = 0; i < total; i++) {
+          if (cancelled) throw ApiException('Cancelled.', 0);
           if (doneParts.contains(i)) { progress = min(1, ((i + 1) * PipsApi.chunkSize) / size); notify(); continue; }
           final start = i * PipsApi.chunkSize;
           await PipsApi.uploadChunk(id, i, bytes.sublist(start, min(start + PipsApi.chunkSize, size)));
@@ -51,13 +64,14 @@ class UploadJob {
           notify();
           await ntf.uploadProgress(nkey, name, progress); // background notification
         }
+        if (cancelled) throw ApiException('Cancelled.', 0);
         await PipsApi.uploadFinish(id, total, size, name, mime, vis);
       }
       status = 'Done ✓'; done = true;
       await ntf.uploadEnd(nkey, name, ok: true, message: 'Uploaded to Pips cloud');
     } on ApiException catch (e) {
-      status = e.message; failed = true;
-      await ntf.uploadEnd(nkey, name, ok: false, message: e.message);
+      status = cancelled ? 'Cancelled' : e.message; failed = true;
+      await ntf.uploadEnd(nkey, name, ok: false, message: status);
     }
     notify();
   }
@@ -70,28 +84,67 @@ class UploadsPage extends StatelessWidget {
         animation: UploadQueue.instance,
         builder: (_, __) {
           final jobs = UploadQueue.instance.jobs;
+          final active = jobs.where((j) => !j.done && !j.failed).toList();
+          final finished = jobs.where((j) => j.done || j.failed).toList();
+          final canClear = finished.isNotEmpty;
           return Scaffold(
-            appBar: AppBar(title: const Text('Uploads'), actions: [
-              TextButton(onPressed: jobs.any((j) => j.done || j.failed) ? UploadQueue.instance.clearFinished : null, child: const Text('Clear finished')),
+            appBar: AppBar(title: const Text('File Upload'), actions: [
+              TextButton(onPressed: canClear ? UploadQueue.instance.clearFinished : null, child: const Text('Clear finished')),
             ]),
             body: jobs.isEmpty
                 ? const EmptyState(icon: '⬆️', text: 'Nothing here yet.\nTap + to pick a file.')
-                : ListView.builder(itemCount: jobs.length, itemBuilder: (_, i) {
-                    final j = jobs[i];
-                    return ListTile(
-                      leading: const IconTile(icon: Icons.upload_file, bg: Color(0xFFDBEAFE), fg: AppTheme.blue),
-                      title: Text(j.name, maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 14)),
-                      subtitle: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                        const SizedBox(height: 6),
-                        ProgressBar(value: j.progress, color: j.failed ? AppTheme.red : (j.done ? AppTheme.green : AppTheme.blue)),
-                        const SizedBox(height: 4),
-                        Text('${fmtBytes(j.size)} · ${j.status}', style: TextStyle(fontSize: 11, color: j.failed ? AppTheme.red : Colors.grey)),
+                : ListView(padding: const EdgeInsets.all(14), children: [
+                    if (active.isNotEmpty) ...[
+                      Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
+                        const Text('In Progress', style: TextStyle(fontWeight: FontWeight.w800, fontSize: 15)),
+                        Text('${active.length} active', style: const TextStyle(fontSize: 12, color: Colors.grey)),
                       ]),
-                    );
-                  }),
+                      ...active.map((j) => _jobCard(context, j)),
+                    ],
+                    if (finished.isNotEmpty) ...[
+                      const SizedBox(height: 10),
+                      const Text('Completed', style: TextStyle(fontWeight: FontWeight.w800, fontSize: 15)),
+                      ...finished.map((j) => _jobCard(context, j)),
+                    ],
+                  ]),
           );
         },
       );
+
+  Widget _jobCard(BuildContext context, UploadJob j) {
+    final pct = (j.progress * 100).round();
+    final left = j.minutesLeft;
+    final color = j.failed ? AppTheme.red : (j.done ? AppTheme.green : AppTheme.blue);
+    final sub = [
+      fmtBytes(j.size),
+      j.status,
+      if (!j.done && !j.failed && left != null) 'About $left min left',
+    ].join(' · ');
+    return Container(
+      margin: const EdgeInsets.only(top: 10),
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(16), border: Border.all(color: const Color(0xFFE8EEF6))),
+      child: Column(children: [
+        Row(children: [
+          const IconTile(icon: Icons.upload_file, bg: Color(0xFFDBEAFE), fg: AppTheme.blue, size: 38),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              Text(j.name, maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 13.5)),
+              const SizedBox(height: 3),
+              Text(sub, maxLines: 1, overflow: TextOverflow.ellipsis, style: TextStyle(fontSize: 11, color: j.failed ? AppTheme.red : Colors.grey)),
+            ]),
+          ),
+          const SizedBox(width: 8),
+          Text(j.done ? '✓' : '$pct%', style: TextStyle(fontWeight: FontWeight.w800, fontSize: 14, color: color)),
+          if (!j.done && !j.failed)
+            IconButton(icon: const Icon(Icons.close, size: 19, color: Colors.grey), tooltip: 'Cancel', onPressed: j.cancel),
+        ]),
+        const SizedBox(height: 8),
+        ProgressBar(value: j.progress, color: color),
+      ]),
+    );
+  }
 }
 
 class UploadSheet extends StatefulWidget {

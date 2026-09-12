@@ -53,8 +53,18 @@ class _AuthScreenState extends State<AuthScreen> {
             child: SingleChildScrollView(
               padding: const EdgeInsets.all(24),
               child: Column(children: [
-                const Icon(Icons.cloud_rounded, size: 64, color: Colors.white),
-                const SizedBox(height: 8),
+                Container(
+                  width: 96,
+                  height: 96,
+                  padding: const EdgeInsets.all(10),
+                  decoration: BoxDecoration(
+                    color: Colors.white,
+                    shape: BoxShape.circle,
+                    boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.15), blurRadius: 18, offset: const Offset(0, 6))],
+                  ),
+                  child: Image.asset('assets/logo.png', fit: BoxFit.contain),
+                ),
+                const SizedBox(height: 10),
                 const Text('Pips', style: TextStyle(fontSize: 32, fontWeight: FontWeight.w800, color: Colors.white)),
                 const Text('Your cloud. Your rules.', style: TextStyle(fontSize: 14, color: Colors.white70)),
                 const SizedBox(height: 22),

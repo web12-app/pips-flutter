@@ -1,10 +1,14 @@
 import 'package:flutter/material.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:url_launcher/url_launcher.dart';
 import '../api.dart';
 import '../main.dart';
 import '../models.dart';
 import '../widgets.dart';
+import 'misc.dart';
+import 'subscription.dart';
 
+/// Account — profile, plan card, camera uploads, desktop link, recovery & settings.
 class ProfilePage extends StatelessWidget {
   const ProfilePage({super.key});
 
@@ -14,8 +18,20 @@ class ProfilePage extends StatelessWidget {
     if (ok == true) { try { await PipsApi.report(c.text.trim()); if (context.mounted) toast(context, 'Report sent — thank you.'); } on ApiException catch (e) { if (context.mounted) toast(context, e.message); } }
   }
 
+  Future<void> _linkDesktop(BuildContext context) async {
+    await showDialog(context: context, builder: (ctx) => AlertDialog(
+          title: const Text('Link your desktop'),
+          content: Column(mainAxisSize: MainAxisSize.min, children: [
+            const Text('Open the Pips web dashboard on your desktop and log in with the same account:', style: TextStyle(fontSize: 13)),
+            const SizedBox(height: 10),
+            SelectableText(PipsApi.base, style: const TextStyle(fontWeight: FontWeight.w700, color: AppTheme.blue)),
+          ]),
+          actions: [FilledButton(onPressed: () => Navigator.pop(ctx), child: const Text('Got it'))],
+        ));
+  }
+
   @override
-  Widget build(BuildContext context) => ListView(padding: const EdgeInsets.all(16), children: [
+  Widget build(BuildContext context) => ListView(padding: const EdgeInsets.fromLTRB(16, 14, 16, 24), children: [
         FutureBuilder<Map<String, dynamic>>(
           future: PipsApi.account(),
           builder: (_, s) {
@@ -23,19 +39,22 @@ class ProfilePage extends StatelessWidget {
             final user = (a['username'] ?? PipsApi.username ?? '').toString();
             final email = (a['email'] ?? '').toString();
             return Column(children: [
-              CircleAvatar(radius: 36, backgroundColor: AppTheme.blue, child: Text(user.isEmpty ? '?' : user[0].toUpperCase(), style: const TextStyle(fontSize: 28, color: Colors.white, fontWeight: FontWeight.bold))),
+              Container(
+                width: 84, height: 84,
+                padding: const EdgeInsets.all(14),
+                decoration: BoxDecoration(color: const Color(0xFFEAF4FF), shape: BoxShape.circle, border: Border.all(color: const Color(0xFFBFDBFE), width: 2)),
+                child: Image.asset('assets/logo.png', fit: BoxFit.contain),
+              ),
               const SizedBox(height: 10),
-              Text('@$user', style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 18)),
+              Text(user.isEmpty ? 'Account' : '@$user', style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 18)),
               if (email.isNotEmpty) Text(email, style: const TextStyle(color: Colors.grey, fontSize: 13)),
-              const SizedBox(height: 10),
-              Wrap(spacing: 8, children: [
-                Chip(label: Text('Files: ${a['file_count'] ?? a['files'] ?? '—'}'), visualDensity: VisualDensity.compact),
-                Chip(label: Text('Followers: ${a['followers'] ?? '—'}'), visualDensity: VisualDensity.compact),
-                Chip(label: Text('Following: ${a['following'] ?? '—'}'), visualDensity: VisualDensity.compact),
-              ]),
             ]);
           },
         ),
+        const SizedBox(height: 14),
+        _planCard(context),
+        const SizedBox(height: 12),
+        _optionsCard(context),
         const SizedBox(height: 12),
         Card(child: Column(children: [
           ListTile(leading: const Icon(Icons.key_outlined, color: AppTheme.blue), title: const Text('API keys'), trailing: const Icon(Icons.chevron_right), onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const ApiKeysPage()))),
@@ -57,6 +76,92 @@ class ProfilePage extends StatelessWidget {
           label: const Text('Log out'),
         ),
       ]);
+
+  // ------------------------------------------------------------- your plan
+  Widget _planCard(BuildContext context) => Container(
+        padding: const EdgeInsets.all(14),
+        decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(18), border: Border.all(color: const Color(0xFFE8EEF6))),
+        child: Column(children: [
+          FutureBuilder<Map<String, dynamic>>(
+            future: PipsApi.account(),
+            builder: (_, s) {
+              final a = s.data ?? {};
+              final used = (a['storage_used'] is num ? (a['storage_used'] as num) : 0).toInt();
+              final quota = (a['quota'] is num && (a['quota'] as num) > 0 ? (a['quota'] as num) : 2199023255552).toInt();
+              final files = a['file_count'] ?? a['files'] ?? 0;
+              return Row(children: [
+                SizedBox(width: 42, height: 42, child: Image.asset('assets/logo.png', fit: BoxFit.contain)),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                    Row(children: [
+                      const Text('Your Plan — Pips Basic', style: TextStyle(fontWeight: FontWeight.w800, fontSize: 14)),
+                      const SizedBox(width: 6),
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                        decoration: BoxDecoration(color: const Color(0xFFECFDF5), borderRadius: BorderRadius.circular(99)),
+                        child: const Text('Free', style: TextStyle(fontSize: 10, fontWeight: FontWeight.w800, color: Color(0xFF059669))),
+                      ),
+                    ]),
+                    const SizedBox(height: 3),
+                    Text('${fmtBytes(used)} of ${fmtBytes(quota)} used · $files files', style: const TextStyle(fontSize: 11.5, color: Colors.grey)),
+                    const SizedBox(height: 8),
+                    ProgressBar(value: quota > 0 ? used / quota : 0),
+                  ]),
+                ),
+              ]);
+            },
+          ),
+          const SizedBox(height: 12),
+          SizedBox(
+            width: double.infinity,
+            child: FilledButton(
+              style: FilledButton.styleFrom(backgroundColor: const Color(0xFF16181D), foregroundColor: Colors.white, padding: const EdgeInsets.symmetric(vertical: 13), shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(13))),
+              onPressed: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const SubscriptionPage())),
+              child: const Text('Manage Your Plan', style: TextStyle(fontWeight: FontWeight.w800)),
+            ),
+          ),
+        ]),
+      );
+
+  // ------------------------------------------------------------- options
+  Widget _optionsCard(BuildContext context) => Card(child: Column(children: [
+        FutureBuilder<bool>(
+          future: _cameraPref(),
+          builder: (_, s) => SwitchListTile(
+            secondary: const IconTile(icon: Icons.photo_camera_outlined, bg: Color(0xFFDBEAFE), fg: AppTheme.blue, size: 38),
+            title: const Text('Camera Uploads', style: TextStyle(fontWeight: FontWeight.w700, fontSize: 14)),
+            subtitle: const Text('Auto-queue new photos for upload (beta)', style: TextStyle(fontSize: 11.5)),
+            value: s.data ?? false,
+            onChanged: (v) async {
+              final p = await SharedPreferences.getInstance();
+              await p.setBool('camera_uploads', v);
+              if (context.mounted) toast(context, v ? 'Camera uploads on — new photos will queue in background.' : 'Camera uploads off.');
+            },
+          ),
+        ),
+        const Divider(height: 1),
+        ListTile(
+          leading: const IconTile(icon: Icons.desktop_windows_outlined, bg: Color(0xFFEDE9FE), fg: AppTheme.purple, size: 38),
+          title: const Text('Link your desktop', style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 14)),
+          subtitle: const Text('Manage uploads from the web dashboard', style: TextStyle(fontSize: 11.5)),
+          trailing: const Icon(Icons.chevron_right),
+          onTap: () => _linkDesktop(context),
+        ),
+        const Divider(height: 1),
+        ListTile(
+          leading: const IconTile(icon: Icons.restore_from_trash_outlined, bg: Color(0xFFFEF3C7), fg: const Color(0xFFD97706), size: 38),
+          title: const Text('Recover deleted files', style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 14)),
+          subtitle: const Text('Restore files from your trash', style: TextStyle(fontSize: 11.5)),
+          trailing: const Icon(Icons.chevron_right),
+          onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const TrashPage())),
+        ),
+      ]));
+
+  static Future<bool> _cameraPref() async {
+    final p = await SharedPreferences.getInstance();
+    return p.getBool('camera_uploads') ?? false;
+  }
 }
 
 class ApiKeysPage extends StatefulWidget {

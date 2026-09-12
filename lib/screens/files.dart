@@ -1,4 +1,5 @@
 import 'dart:io';
+import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:share_plus/share_plus.dart';
@@ -10,15 +11,23 @@ import 'uploads.dart';
 import 'misc.dart';
 
 class FilesPage extends StatefulWidget {
-  const FilesPage({super.key});
+  final String initialFilter;
+  const FilesPage({super.key, this.initialFilter = ''});
   @override
   State<FilesPage> createState() => _FilesPageState();
 }
 
 class _FilesPageState extends State<FilesPage> {
   String q = '', filter = '';
+  String sort = 'date'; // date | name | size
   Key refresh = UniqueKey();
   void reload() => setState(() => refresh = UniqueKey());
+
+  @override
+  void initState() {
+    super.initState();
+    filter = widget.initialFilter;
+  }
 
   @override
   Widget build(BuildContext context) => Scaffold(
@@ -39,6 +48,13 @@ class _FilesPageState extends State<FilesPage> {
                 onSelected: (_) => setState(() => filter = f),
               )),
           ])),
+          SizedBox(height: 52, child: ListView(scrollDirection: Axis.horizontal, padding: const EdgeInsets.symmetric(horizontal: 12), children: [
+            Padding(padding: const EdgeInsets.symmetric(horizontal: 4), child: _pill('Upload', Icons.upload_file, const Color(0xFF2563EB), const Color(0xFFDBEAFE), () => showSheet(context, const UploadSheet()))),
+            Padding(padding: const EdgeInsets.symmetric(horizontal: 4), child: _pill('Folder', Icons.create_new_folder_outlined, const Color(0xFF059669), const Color(0xFFD1FAE5), () => Navigator.push(context, MaterialPageRoute(builder: (_) => const FoldersPage())))),
+            Padding(padding: const EdgeInsets.symmetric(horizontal: 4), child: _pill('Scan', Icons.document_scanner_outlined, const Color(0xFF0D9488), const Color(0xFFCCFBF1), _scan)),
+            const Padding(padding: EdgeInsets.symmetric(horizontal: 4), child: VerticalDivider(width: 12)),
+            Padding(padding: const EdgeInsets.symmetric(horizontal: 4), child: _sortChip()),
+          ])),
           Expanded(child: FutureBuilder<List<dynamic>>(
             key: refresh,
             future: q.isEmpty
@@ -46,14 +62,57 @@ class _FilesPageState extends State<FilesPage> {
                 : PipsApi.search(q, filter.isEmpty ? null : filter).then((r) => r['files'] is List ? r['files'] as List : (r['results'] is List ? r['results'] as List : <dynamic>[])),
             builder: (_, s) {
               if (s.connectionState != ConnectionState.done) return const Loading();
-              final items = (s.data ?? []).map((e) => Entry(Map<String, dynamic>.from(e as Map))).toList()
-                ..sort((a, b) => b.uploadedAt.compareTo(a.uploadedAt));
+              final items = (s.data ?? []).map((e) => Entry(Map<String, dynamic>.from(e as Map))).toList();
+              if (filter == 'image') items.removeWhere((e) => !isImage(e.mime, e.name) || e.isDb);
+              if (filter == 'video') items.removeWhere((e) => !isVideo(e.mime, e.name));
+              if (filter == 'audio') items.removeWhere((e) => !isAudio(e.mime, e.name));
+              if (filter == 'doc') items.removeWhere((e) => isVideo(e.mime, e.name) || isImage(e.mime, e.name) || isAudio(e.mime, e.name));
+              switch (sort) {
+                case 'name': items.sort((a, b) => a.name.toLowerCase().compareTo(b.name.toLowerCase()));
+                case 'size': items.sort((a, b) => b.size.compareTo(a.size));
+                default: items.sort((a, b) => b.uploadedAt.compareTo(a.uploadedAt));
+              }
               if (items.isEmpty) return const EmptyState(icon: '📭', text: 'No files found.');
               return ListView.builder(itemCount: items.length, itemBuilder: (_, i) => fileTile(context, items[i], reload, gallery: items));
             },
           )),
         ]),
       );
+  Widget _pill(String label, IconData icon, Color fg, Color bg, VoidCallback onTap) => GestureDetector(
+        onTap: onTap,
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+          decoration: BoxDecoration(color: bg, borderRadius: BorderRadius.circular(12)),
+          child: Row(mainAxisSize: MainAxisSize.min, children: [
+            Icon(icon, size: 17, color: fg),
+            const SizedBox(width: 6),
+            Text(label, style: TextStyle(color: fg, fontWeight: FontWeight.w700, fontSize: 13)),
+          ]),
+        ),
+      );
+
+  Widget _sortChip() => ActionChip(
+        avatar: const Icon(Icons.sort, size: 16, color: AppTheme.blue),
+        label: Text(sort == 'date' ? 'Newest' : (sort == 'name' ? 'Name A-Z' : 'Largest'), style: const TextStyle(fontSize: 12.5)),
+        onPressed: () => setState(() => sort = sort == 'date' ? 'name' : (sort == 'name' ? 'size' : 'date')),
+      );
+
+  Future<void> _scan() async {
+    final r = await FilePicker.platform.pickFiles(type: FileType.image);
+    final f = r?.files.single;
+    if (f == null || f.path == null) return;
+    const mimes = {'jpg': 'image/jpeg', 'jpeg': 'image/jpeg', 'png': 'image/png', 'webp': 'image/webp', 'heic': 'image/heic'};
+    final ext = f.name.split('.').last.toLowerCase();
+    UploadQueue.instance.add(UploadJob(
+      path: f.path!,
+      name: 'scan-${DateTime.now().millisecondsSinceEpoch}.$ext',
+      mime: mimes[ext] ?? 'image/jpeg',
+      vis: 'private',
+      folder: '',
+      size: f.size,
+    ));
+    if (mounted) toast(context, 'Scan queued — uploading as private image.');
+  }
 }
 
 Widget fileTile(BuildContext context, Entry e, VoidCallback onChanged, {List<Entry>? gallery}) {

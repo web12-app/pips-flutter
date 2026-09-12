@@ -5,9 +5,9 @@ import 'widgets.dart';
 import 'screens/auth.dart';
 import 'screens/overview.dart';
 import 'screens/files.dart';
-import 'screens/uploads.dart';
-import 'screens/channels.dart';
+import 'screens/photos.dart';
 import 'screens/profile.dart';
+import 'screens/uploads.dart';
 
 final authed = ValueNotifier(PipsApi.session != null && PipsApi.session!.isNotEmpty);
 final themeMode = ValueNotifier(ThemeMode.system);
@@ -38,6 +38,7 @@ class PipsApp extends StatelessWidget {
       );
 }
 
+/// Main shell with the floating dark pill bottom bar (Home · Files · + · Photos · Account).
 class MainShell extends StatefulWidget {
   const MainShell({super.key});
   @override
@@ -46,25 +47,68 @@ class MainShell extends StatefulWidget {
 
 class _MainShellState extends State<MainShell> {
   int tab = 0;
+
+  static const _pages = [OverviewPage(), FilesPage(), PhotosPage(), ProfilePage()];
+
+  void _onTap(int i) {
+    if (i == 2) {
+      showSheet(context, const UploadSheet());
+      return;
+    }
+    setState(() => tab = i < 2 ? i : i - 1);
+  }
+
   @override
-  Widget build(BuildContext context) => Scaffold(
-        body: IndexedStack(index: tab, children: const [
-          OverviewPage(), FilesPage(), UploadsPage(), ChannelsPage(), ProfilePage(),
-        ]),
-        floatingActionButton: FloatingActionButton(
-          onPressed: () => showSheet(context, const UploadSheet()),
-          child: const Icon(Icons.add),
+  Widget build(BuildContext context) {
+    final selected = tab == 0 ? 0 : tab + 1; // map page index -> bar slot (skip center)
+    return Scaffold(
+      body: IndexedStack(index: tab, children: _pages),
+      bottomNavigationBar: SafeArea(
+        top: false,
+        child: Container(
+          margin: const EdgeInsets.fromLTRB(16, 4, 16, 10),
+          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+          decoration: BoxDecoration(
+            color: const Color(0xFF16181D),
+            borderRadius: BorderRadius.circular(30),
+            boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.18), blurRadius: 18, offset: const Offset(0, 6))],
+          ),
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              _item(0, Icons.home_rounded, selected == 0),
+              _item(1, Icons.folder_copy_outlined, selected == 1),
+              _centerButton(),
+              _item(3, Icons.photo_library_outlined, selected == 3),
+              _item(4, Icons.person_outline, selected == 4),
+            ],
+          ),
         ),
-        bottomNavigationBar: NavigationBar(
-          selectedIndex: tab,
-          onDestinationSelected: (i) => setState(() => tab = i),
-          destinations: const [
-            NavigationDestination(icon: Icon(Icons.dashboard_outlined), selectedIcon: Icon(Icons.dashboard), label: 'Overview'),
-            NavigationDestination(icon: Icon(Icons.folder_copy_outlined), selectedIcon: Icon(Icons.folder_copy), label: 'Files'),
-            NavigationDestination(icon: Icon(Icons.upload_outlined), selectedIcon: Icon(Icons.upload), label: 'Uploads'),
-            NavigationDestination(icon: Icon(Icons.tv_outlined), selectedIcon: Icon(Icons.tv), label: 'Channels'),
-            NavigationDestination(icon: Icon(Icons.person_outline), selectedIcon: Icon(Icons.person), label: 'Profile'),
-          ],
+      ),
+    );
+  }
+
+  Widget _item(int slot, IconData icon, bool active) => GestureDetector(
+        behavior: HitTestBehavior.opaque,
+        onTap: () => _onTap(slot),
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 180),
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 9),
+          decoration: BoxDecoration(
+            color: active ? Colors.white.withValues(alpha: 0.14) : Colors.transparent,
+            borderRadius: BorderRadius.circular(22),
+          ),
+          child: Icon(icon, size: 23, color: active ? Colors.white : Colors.white54),
+        ),
+      );
+
+  Widget _centerButton() => GestureDetector(
+        onTap: () => _onTap(2),
+        child: Container(
+          width: 46,
+          height: 46,
+          decoration: const BoxDecoration(color: AppTheme.blue, shape: BoxShape.circle),
+          child: const Icon(Icons.add, color: Colors.white, size: 26),
         ),
       );
 }
