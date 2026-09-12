@@ -1,10 +1,12 @@
 import 'package:firebase_core/firebase_core.dart';
 import 'package:flutter/material.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'api.dart';
 import 'firebase_options.dart';
 import 'services/notifications.dart';
 import 'widgets.dart';
 import 'screens/auth.dart';
+import 'screens/onboarding.dart';
 import 'screens/overview.dart';
 import 'screens/files.dart';
 import 'screens/photos.dart';
@@ -13,6 +15,7 @@ import 'screens/uploads.dart';
 
 final authed = ValueNotifier(PipsApi.session != null && PipsApi.session!.isNotEmpty);
 final themeMode = ValueNotifier(ThemeMode.system);
+final onboardingDone = ValueNotifier(true); // set from prefs in main()
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -23,6 +26,10 @@ void main() async {
   }
   await PipsNotify.i.init();
   await PipsApi.loadSession();
+  try {
+    final p = await SharedPreferences.getInstance();
+    onboardingDone.value = p.getBool('onboarding_done') ?? false;
+  } catch (_) {}
   runApp(const PipsApp());
 }
 
@@ -38,8 +45,19 @@ class PipsApp extends StatelessWidget {
           darkTheme: ThemeData(useMaterial3: true, colorScheme: ColorScheme.fromSeed(seedColor: AppTheme.blue, brightness: Brightness.dark)),
           themeMode: mode,
           home: ValueListenableBuilder<bool>(
-            valueListenable: authed,
-            builder: (_, a, __) => a ? const MainShell() : AuthScreen(onAuthed: () => authed.value = true),
+            valueListenable: onboardingDone,
+            builder: (_, ob, ___) => !ob
+                ? OnboardingScreen(
+                    onDone: () async {
+                      final p = await SharedPreferences.getInstance();
+                      await p.setBool('onboarding_done', true);
+                      onboardingDone.value = true;
+                    },
+                  )
+                : ValueListenableBuilder<bool>(
+                    valueListenable: authed,
+                    builder: (_, a, __) => a ? const MainShell() : AuthScreen(onAuthed: () => authed.value = true),
+                  ),
           ),
         ),
       );

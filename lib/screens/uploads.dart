@@ -2,6 +2,8 @@ import 'dart:io';
 import 'dart:math';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
+import 'package:http/http.dart' as http;
+import 'package:path_provider/path_provider.dart';
 import '../api.dart';
 import '../models.dart';
 import '../services/notifications.dart';
@@ -147,6 +149,8 @@ class UploadsPage extends StatelessWidget {
   }
 }
 
+/// "Add new files" sheet — dashed drop zone with multi-select from gallery or
+/// documents, URL import, per-file cards, then live progress (per the design).
 class UploadSheet extends StatefulWidget {
   final String presetFolder;
   const UploadSheet({super.key, this.presetFolder = ''});
@@ -154,55 +158,175 @@ class UploadSheet extends StatefulWidget {
   State<UploadSheet> createState() => _UploadSheetState();
 }
 
+class _Pick {
+  String path;
+  final String name, mime;
+  int size;
+  final bool isUrl;
+  bool fetching;
+  _Pick({required this.path, required this.name, required this.size, required this.mime, this.isUrl = false, this.fetching = false});
+}
+
 class _UploadSheetState extends State<UploadSheet> {
-  String? path, name, mime = 'application/octet-stream';
-  int size = 0;
+  final items = <_Pick>[];
+  final urlCtrl = TextEditingController();
   String vis = 'public', folder = '';
   bool busy = false;
+  bool started = false; // after Upload -> live progress view
 
-  static const _mimes = {'pdf': 'application/pdf', 'png': 'image/png', 'jpg': 'image/jpeg', 'jpeg': 'image/jpeg', 'mp4': 'video/mp4', 'mp3': 'audio/mpeg', 'zip': 'application/zip', 'txt': 'text/plain', 'json': 'application/json'};
+  static const _mimes = {'pdf': 'application/pdf', 'png': 'image/png', 'jpg': 'image/jpeg', 'jpeg': 'image/jpeg', 'gif': 'image/gif', 'webp': 'image/webp', 'mp4': 'video/mp4', 'mov': 'video/quicktime', 'mkv': 'video/x-matroska', 'avi': 'video/x-msvideo', 'mp3': 'audio/mpeg', 'wav': 'audio/wav', 'm4a': 'audio/mp4', 'zip': 'application/zip', 'rar': 'application/vnd.rar', '7z': 'application/x-7z-compressed', 'txt': 'text/plain', 'json': 'application/json', 'csv': 'text/csv', 'doc': 'application/msword', 'docx': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document', 'xls': 'application/vnd.ms-excel', 'xlsx': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'};
 
-  Future<void> pick() async {
-    final r = await FilePicker.platform.pickFiles();
-    final f = r?.files.single;
-    if (f == null || f.path == null) return;
-    setState(() {
-      path = f.path; name = f.name; size = f.size;
-      final ext = f.name.split('.').last.toLowerCase();
-      mime = _mimes[ext] ?? 'application/octet-stream';
-    });
+  static (IconData, Color) _iconFor(String name) {
+    final ext = name.contains('.') ? name.split('.').last.toLowerCase() : '';
+    if (['png', 'jpg', 'jpeg', 'gif', 'webp', 'heic'].contains(ext)) return (Icons.image_outlined, AppTheme.purple);
+    if (['mp4', 'mov', 'mkv', 'avi', 'webm'].contains(ext)) return (Icons.movie_outlined, AppTheme.teal);
+    if (['mp3', 'wav', 'm4a', 'flac', 'ogg'].contains(ext)) return (Icons.music_note_outlined, AppTheme.orange);
+    if (ext == 'pdf') return (Icons.picture_as_pdf_outlined, AppTheme.red);
+    if (['doc', 'docx', 'odt', 'rtf'].contains(ext)) return (Icons.description_outlined, AppTheme.blue);
+    if (['xls', 'xlsx', 'csv'].contains(ext)) return (Icons.table_chart_outlined, AppTheme.green);
+    if (['zip', 'rar', '7z', 'tar', 'gz'].contains(ext)) return (Icons.folder_zip_outlined, AppTheme.orange);
+    return (Icons.insert_drive_file_outlined, Colors.grey);
   }
 
-  Future<void> upload() async {
-    if (path == null) return;
-    setState(() => busy = true);
-    UploadQueue.instance.add(UploadJob(path: path!, name: name!, mime: mime!, vis: vis, folder: folder, size: size));
-    if (mounted) Navigator.pop(context);
+  void _addPicked(List<PlatformFile> files) {
+    if (files.isEmpty) return;
+    var added = 0;
+    for (final f in files) {
+      if (f.path == null) continue;
+      final dup = items.any((e) => e.name == f.name && e.size == f.size);
+      if (dup) continue;
+      final ext = f.name.contains('.') ? f.name.split('.').last.toLowerCase() : '';
+      items.add(_Pick(path: f.path!, name: f.name, size: f.size, mime: _mimes[ext] ?? 'application/octet-stream'));
+      added++;
+    }
+    setState(() {});
+    if (mounted && added > 0) toast(context, '$added file${added == 1 ? '' : 's'} added');
+  }
+
+  Future<void> pickGallery() async {
+    try {
+      final r = await FilePicker.platform.pickFiles(type: FileType.media, allowMultiple: true);
+      _addPicked(r?.files ?? const []);
+    } catch (_) {}
+  }
+
+  Future<void> pickDocs() async {
+    try {
+      final r = await FilePicker.platform.pickFiles(allowMultiple: true);
+      _addPicked(r?.files ?? const []);
+    } catch (_) {}
+  }
+
+  Future<void> importUrl() async {
+    var raw = urlCtrl.text.trim();
+    if (raw.isEmpty) return;
+    if (!raw.startsWith('http://') && !raw.startsWith('https://')) raw = 'https://$raw';
+    final uri = Uri.tryParse(raw);
+    if (uri == null || !uri.host.contains('.')) {
+      toast(context, 'Enter a valid URL.');
+      return;
+    }
+    final seg = uri.pathSegments.where((s) => s.isNotEmpty).toList();
+    final name = seg.isNotEmpty ? Uri.decodeComponent(seg.last) : 'import-${DateTime.now().millisecondsSinceEpoch}';
+    final ext = name.contains('.') ? name.split('.').last.toLowerCase() : '';
+    final entry = _Pick(path: '', name: name, size: 0, mime: _mimes[ext] ?? 'application/octet-stream', isUrl: true, fetching: true);
+    setState(() {
+      items.add(entry);
+      urlCtrl.clear();
+    });
+    try {
+      final resp = await http.get(uri).timeout(const Duration(seconds: 90));
+      if (resp.statusCode >= 400) throw Exception('http ${resp.statusCode}');
+      final dir = await getTemporaryDirectory();
+      final safe = name.replaceAll(RegExp(r'[^\w.\- ]'), '_');
+      final f = File('${dir.path}/pips-url-${DateTime.now().millisecondsSinceEpoch}-$safe');
+      await f.writeAsBytes(resp.bodyBytes);
+      if (!mounted) return;
+      setState(() {
+        entry
+          ..path = f.path
+          ..size = resp.bodyBytes.length
+          ..fetching = false;
+      });
+    } catch (_) {
+      if (!mounted) return;
+      setState(() => items.remove(entry));
+      toast(context, 'Could not fetch that URL.');
+    }
+  }
+
+  void upload() {
+    final ready = items.where((e) => !e.fetching && e.path.isNotEmpty).toList();
+    if (ready.isEmpty) return;
+    for (final e in ready) {
+      UploadQueue.instance.add(UploadJob(path: e.path, name: e.name, mime: e.mime, vis: vis, folder: folder, size: e.size));
+    }
+    setState(() => started = true);
   }
 
   @override
-  Widget build(BuildContext context) => SafeArea(
-        child: Padding(
+  Widget build(BuildContext context) {
+    if (started) return _progressView(context);
+    return SafeArea(
+      child: Container(
+        constraints: BoxConstraints(maxHeight: MediaQuery.of(context).size.height * 0.88),
+        child: SingleChildScrollView(
           padding: const EdgeInsets.fromLTRB(20, 16, 20, 20),
           child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-            const Text('Upload to Pips', style: TextStyle(fontWeight: FontWeight.w800, fontSize: 17)),
-            const SizedBox(height: 12),
-            GestureDetector(
-              onTap: pick,
-              child: GlassCard(child: Row(children: [
-                const Icon(Icons.add_circle_outline, color: AppTheme.blue),
-                const SizedBox(width: 10),
-                Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                  Text(name ?? 'Tap to choose a file', style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 14)),
-                  Text(name == null ? 'Any type · ≤4 MB single, chunked above' : '${fmtBytes(size)} · $mime', style: const TextStyle(fontSize: 12, color: Colors.grey)),
-                ])),
-              ])),
-            ),
+            Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
+              const Text('Add new files', style: TextStyle(fontWeight: FontWeight.w800, fontSize: 17)),
+              GestureDetector(
+                onTap: () => Navigator.pop(context),
+                child: Container(
+                  width: 30, height: 30,
+                  decoration: const BoxDecoration(color: Color(0xFFF1F5F9), shape: BoxShape.circle),
+                  child: const Icon(Icons.close, size: 17, color: Colors.grey),
+                ),
+              ),
+            ]),
+            const SizedBox(height: 14),
+            _dropZone(),
             const SizedBox(height: 10),
             Row(children: [
+              Expanded(child: _pill(Icons.photo_library_outlined, 'Select from Gallery', AppTheme.blue, pickGallery)),
+              const SizedBox(width: 10),
+              Expanded(child: _pill(Icons.description_outlined, 'Select Documents', AppTheme.purple, pickDocs)),
+            ]),
+            if (items.isNotEmpty) ...[
+              const SizedBox(height: 14),
+              ...items.map(_pickCard),
+            ],
+            const SizedBox(height: 16),
+            Row(children: const [
+              Expanded(child: Divider(color: Color(0xFFE2E8F0))),
+              Padding(padding: EdgeInsets.symmetric(horizontal: 12), child: Text('OR', style: TextStyle(color: Colors.grey, fontSize: 12, fontWeight: FontWeight.w700))),
+              Expanded(child: Divider(color: Color(0xFFE2E8F0))),
+            ]),
+            const SizedBox(height: 14),
+            const Text('Import from URL', style: TextStyle(fontWeight: FontWeight.w700, fontSize: 13.5)),
+            const SizedBox(height: 8),
+            TextField(
+              controller: urlCtrl,
+              keyboardType: TextInputType.url,
+              decoration: InputDecoration(
+                hintText: 'www.example.com/file.pdf',
+                prefixIcon: const Icon(Icons.link, size: 19),
+                suffixIcon: TextButton(
+                  onPressed: busy ? null : importUrl,
+                  child: const Text('Select', style: TextStyle(fontWeight: FontWeight.w700, color: AppTheme.blue)),
+                ),
+                filled: true,
+                fillColor: Colors.white,
+                contentPadding: const EdgeInsets.symmetric(vertical: 6),
+                enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: const BorderSide(color: AppTheme.blue, width: 1.4)),
+                border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: const BorderSide(color: AppTheme.blue, width: 1.4)),
+              ),
+            ),
+            const SizedBox(height: 14),
+            Row(children: [
               Expanded(child: OutlinedButton.icon(
-                icon: Icon(vis == 'public' ? Icons.public : Icons.lock),
-                label: Text(vis == 'public' ? 'Public' : 'Private'),
+                icon: Icon(vis == 'public' ? Icons.public : Icons.lock, size: 17),
+                label: Text(vis == 'public' ? 'Public' : 'Private', style: const TextStyle(fontSize: 13)),
                 onPressed: () => setState(() => vis = vis == 'public' ? 'private' : 'public'),
               )),
               const SizedBox(width: 10),
@@ -214,21 +338,237 @@ class _UploadSheetState extends State<UploadSheet> {
                   return DropdownButtonFormField<String>(
                     decoration: const InputDecoration(border: OutlineInputBorder(), contentPadding: EdgeInsets.symmetric(horizontal: 10)),
                     initialValue: folder.isEmpty ? null : folder,
-                    hint: const Text('Folder'),
+                    hint: const Text('Folder', style: TextStyle(fontSize: 13)),
                     items: [const DropdownMenuItem(value: '', child: Text('No folder')), ...folders.map((f) => DropdownMenuItem(value: f, child: Text(f, overflow: TextOverflow.ellipsis)))],
                     onChanged: (v) => setState(() => folder = v ?? ''),
                   );
                 },
               )),
             ]),
-            const SizedBox(height: 14),
-            FilledButton.icon(
-              onPressed: busy || path == null ? null : upload,
-              icon: const Icon(Icons.upload),
-              label: Text(busy ? 'Starting…' : 'Upload'),
-              style: FilledButton.styleFrom(padding: const EdgeInsets.symmetric(vertical: 14)),
+            const SizedBox(height: 12),
+            GestureDetector(
+              behavior: HitTestBehavior.opaque,
+              onTap: _help,
+              child: Padding(
+                padding: const EdgeInsets.symmetric(vertical: 4),
+                child: Row(children: const [
+                  Icon(Icons.help_outline, size: 17, color: Colors.grey),
+                  SizedBox(width: 6),
+                  Text('Still need help?', style: TextStyle(fontSize: 13, color: Colors.grey, fontWeight: FontWeight.w600)),
+                ]),
+              ),
             ),
+            const SizedBox(height: 12),
+            Row(children: [
+              Expanded(child: OutlinedButton(
+                onPressed: () => Navigator.pop(context),
+                style: OutlinedButton.styleFrom(padding: const EdgeInsets.symmetric(vertical: 13), side: const BorderSide(color: Color(0xFFDCE4EE)), shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12))),
+                child: const Text('Cancel', style: TextStyle(color: Colors.grey, fontWeight: FontWeight.w600)),
+              )),
+              const SizedBox(width: 10),
+              Expanded(child: FilledButton(
+                onPressed: items.any((e) => !e.fetching && e.path.isNotEmpty) ? upload : null,
+                style: FilledButton.styleFrom(padding: const EdgeInsets.symmetric(vertical: 13), shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12))),
+                child: Text('Upload${items.isEmpty ? '' : ' (${items.length})'}', style: const TextStyle(fontWeight: FontWeight.w700)),
+              )),
+            ]),
           ]),
         ),
+      ),
+    );
+  }
+
+  Widget _dropZone() => GestureDetector(
+        onTap: pickDocs,
+        child: CustomPaint(
+          painter: _DashedRRect(color: const Color(0xFF93B8F5), radius: 14),
+          child: Container(
+            width: double.infinity,
+            padding: const EdgeInsets.symmetric(vertical: 26, horizontal: 16),
+            child: Column(children: [
+              Container(
+                width: 46, height: 46,
+                decoration: BoxDecoration(color: const Color(0xFFEAF2FE), borderRadius: BorderRadius.circular(13)),
+                child: const Icon(Icons.file_upload_outlined, color: AppTheme.blue, size: 24),
+              ),
+              const SizedBox(height: 12),
+              Text.rich(
+                TextSpan(style: const TextStyle(fontSize: 13.5, color: Color(0xFF334155)), children: const [
+                  TextSpan(text: 'Tap or '),
+                  TextSpan(text: 'choose', style: TextStyle(color: AppTheme.blue, fontWeight: FontWeight.w800)),
+                  TextSpan(text: ' files to upload', style: TextStyle(fontWeight: FontWeight.w700)),
+                ]),
+                textAlign: TextAlign.center,
+              ),
+              const SizedBox(height: 5),
+              const Text('Select images, videos, zip, pdf or ms word', style: TextStyle(fontSize: 12, color: Colors.grey)),
+            ]),
+          ),
+        ),
       );
+
+  Widget _pill(IconData icon, String label, Color color, VoidCallback onTap) => OutlinedButton.icon(
+        onPressed: onTap,
+        icon: Icon(icon, size: 17, color: color),
+        label: Text(label, style: const TextStyle(fontSize: 12.5, fontWeight: FontWeight.w700), overflow: TextOverflow.ellipsis),
+        style: OutlinedButton.styleFrom(
+          foregroundColor: color,
+          padding: const EdgeInsets.symmetric(vertical: 11),
+          side: BorderSide(color: color.withValues(alpha: 0.35)),
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+        ),
+      );
+
+  Widget _pickCard(_Pick e) {
+    final (icon, color) = _iconFor(e.name);
+    return Container(
+      margin: const EdgeInsets.only(top: 8),
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+      decoration: BoxDecoration(color: const Color(0xFFF8FAFC), borderRadius: BorderRadius.circular(13), border: Border.all(color: const Color(0xFFE8EEF6))),
+      child: Row(children: [
+        IconTile(icon: icon, bg: color.withValues(alpha: 0.14), fg: color, size: 36),
+        const SizedBox(width: 10),
+        Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Text(e.name, maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 13)),
+          const SizedBox(height: 2),
+          Text(e.fetching ? 'Fetching…' : '${fmtBytes(e.size)} · ${e.isUrl ? 'from URL' : 'ready'}', style: const TextStyle(fontSize: 11, color: Colors.grey)),
+        ])),
+        if (e.fetching)
+          const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2))
+        else
+          GestureDetector(
+            onTap: () => setState(() => items.remove(e)),
+            child: const Icon(Icons.close, size: 18, color: Colors.grey),
+          ),
+      ]),
+    );
+  }
+
+  Widget _progressView(BuildContext context) => SafeArea(
+        child: AnimatedBuilder(
+          animation: UploadQueue.instance,
+          builder: (_, __) {
+            final jobs = UploadQueue.instance.jobs;
+            final active = jobs.where((j) => !j.done && !j.failed).toList();
+            return Padding(
+              padding: const EdgeInsets.fromLTRB(20, 16, 20, 20),
+              child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+                Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
+                  Text('Uploading ${active.isEmpty ? '' : '${active.length} '}${active.length == 1 ? 'file' : 'files'}…', style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 17)),
+                  TextButton(
+                    onPressed: () => Navigator.pop(context),
+                    child: const Text('Hide', style: TextStyle(fontWeight: FontWeight.w700)),
+                  ),
+                ]),
+                Flexible(
+                  child: ListView.builder(
+                    shrinkWrap: true,
+                    itemCount: jobs.length,
+                    itemBuilder: (_, i) {
+                      final j = jobs[i];
+                      final left = j.minutesLeft;
+                      final color = j.failed ? AppTheme.red : (j.done ? AppTheme.green : AppTheme.blue);
+                      final (icon, ic) = _iconFor(j.name);
+                      final sub = [
+                        fmtBytes(j.size),
+                        j.status,
+                        if (!j.done && !j.failed && left != null) '$left second${left == 1 ? '' : 's'} left',
+                      ].join(' · ');
+                      return Container(
+                        margin: const EdgeInsets.only(top: 8),
+                        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                        decoration: BoxDecoration(color: const Color(0xFFF8FAFC), borderRadius: BorderRadius.circular(13), border: Border.all(color: const Color(0xFFE8EEF6))),
+                        child: Column(children: [
+                          Row(children: [
+                            IconTile(icon: icon, bg: ic.withValues(alpha: 0.14), fg: ic, size: 34),
+                            const SizedBox(width: 10),
+                            Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                              Text(j.name, maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 12.5)),
+                              const SizedBox(height: 2),
+                              Text(sub, maxLines: 1, overflow: TextOverflow.ellipsis, style: TextStyle(fontSize: 11, color: j.failed ? AppTheme.red : Colors.grey)),
+                            ])),
+                            if (!j.done && !j.failed)
+                              GestureDetector(onTap: j.cancel, child: const Icon(Icons.close, size: 17, color: Colors.grey)),
+                          ]),
+                          const SizedBox(height: 8),
+                          ProgressBar(value: j.progress, color: color, height: 5),
+                        ]),
+                      );
+                    },
+                  ),
+                ),
+                const SizedBox(height: 12),
+                Row(children: [
+                  Expanded(child: OutlinedButton(
+                    onPressed: () => Navigator.pop(context),
+                    style: OutlinedButton.styleFrom(padding: const EdgeInsets.symmetric(vertical: 13), side: const BorderSide(color: Color(0xFFDCE4EE)), shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12))),
+                    child: const Text('Cancel', style: TextStyle(color: Colors.grey, fontWeight: FontWeight.w600)),
+                  )),
+                  const SizedBox(width: 10),
+                  Expanded(child: FilledButton(
+                    onPressed: () {
+                      Navigator.pop(context);
+                      toast(context, 'Uploads continue in the background — see the Uploads tab.');
+                    },
+                    style: FilledButton.styleFrom(padding: const EdgeInsets.symmetric(vertical: 13), shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12))),
+                    child: const Text('Done', style: TextStyle(fontWeight: FontWeight.w700)),
+                  )),
+                ]),
+              ]),
+            );
+          },
+        ),
+      );
+
+  void _help() {
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Need help with uploads?'),
+        content: const Text('Pick files from your gallery or documents, or paste a direct file URL under "Import from URL". Files larger than 4 MB upload in chunks automatically and continue in the background.'),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Close')),
+          FilledButton(
+            onPressed: () async {
+              Navigator.pop(ctx);
+              try {
+                await PipsApi.report('App: upload help requested');
+                if (mounted) toast(context, 'Support notified — we will reach out soon.');
+              } on ApiException catch (e) {
+                if (mounted) toast(context, e.message);
+              }
+            },
+            child: const Text('Contact support'),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _DashedRRect extends CustomPainter {
+  final Color color;
+  final double radius;
+  _DashedRRect({required this.color, required this.radius});
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final path = Path()
+      ..addRRect(RRect.fromRectAndRadius(Offset.zero & size, Radius.circular(radius)));
+    final paint = Paint()
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 1.6
+      ..color = color;
+    const dash = 6.0, gap = 5.0;
+    for (final metric in path.computeMetrics()) {
+      double d = 0;
+      while (d < metric.length) {
+        canvas.drawPath(metric.extractPath(d, min(d + dash, metric.length)), paint);
+        d += dash + gap;
+      }
+    }
+  }
+
+  @override
+  bool shouldRepaint(covariant _DashedRRect oldDelegate) => oldDelegate.color != color;
 }
