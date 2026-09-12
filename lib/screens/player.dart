@@ -344,8 +344,6 @@ class _AdvancedPlayerViewState extends State<AdvancedPlayerView> {
                             trackHeight: 3,
                             thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 6),
                             overlayShape: SliderComponentShape.noOverlay,
-                            inactiveColor: Colors.white24,
-                            activeColor: Colors.white,
                           ),
                           child: Slider(
                             value: posMs,

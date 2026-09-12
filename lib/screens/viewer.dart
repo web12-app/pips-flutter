@@ -214,6 +214,8 @@ class _ZoomableImage extends StatefulWidget {
 
 class _ZoomableImageState extends State<_ZoomableImage> with SingleTickerProviderStateMixin {
   final tc = TransformationController();
+  late final AnimationController _zoomCtrl = AnimationController(vsync: this, duration: const Duration(milliseconds: 220));
+  Animation<Matrix4>? _zoomAnim;
   TapDownDetails? tapDown;
   bool zoomed = false;
   late final Future<List<int>> _fut = _loadImageBytes(widget.e.id);
@@ -222,6 +224,16 @@ class _ZoomableImageState extends State<_ZoomableImage> with SingleTickerProvide
   void initState() {
     super.initState();
     tc.addListener(_onChanged);
+    _zoomCtrl.addListener(_onZoomTick);
+  }
+
+  void _onZoomTick() {
+    if (_zoomAnim != null) tc.value = _zoomAnim!.value;
+  }
+
+  void _animateTo(Matrix4 target) {
+    _zoomAnim = Matrix4Tween(begin: tc.value.clone(), end: target).animate(CurvedAnimation(parent: _zoomCtrl, curve: Curves.easeOut));
+    _zoomCtrl.forward(from: 0);
   }
 
   void _onChanged() {
@@ -234,19 +246,20 @@ class _ZoomableImageState extends State<_ZoomableImage> with SingleTickerProvide
 
   @override
   void dispose() {
+    _zoomCtrl.dispose();
     tc.dispose();
     super.dispose();
   }
 
   void _doubleTap() {
     if (zoomed) {
-      tc.animateTo(Matrix4.identity(), curve: Curves.easeOut, duration: const Duration(milliseconds: 220));
+      _animateTo(Matrix4.identity());
     } else {
       final p = tapDown?.localPosition;
       final m = Matrix4.identity();
       if (p != null) m.translate(-p.dx * 1.5, -p.dy * 1.5);
       m.scale(2.5);
-      tc.animateTo(m, curve: Curves.easeOut, duration: const Duration(milliseconds: 220));
+      _animateTo(m);
     }
   }
 
