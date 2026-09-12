@@ -1,5 +1,7 @@
+import 'package:firebase_core/firebase_core.dart';
 import 'package:flutter/material.dart';
 import 'api.dart';
+import 'firebase_options.dart';
 import 'services/notifications.dart';
 import 'widgets.dart';
 import 'screens/auth.dart';
@@ -14,6 +16,11 @@ final themeMode = ValueNotifier(ThemeMode.system);
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  try {
+    await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform);
+  } catch (_) {
+    // Firebase is optional at launch — never block app start if it fails.
+  }
   await PipsNotify.i.init();
   await PipsApi.loadSession();
   runApp(const PipsApp());

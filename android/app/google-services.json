@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "929803975487",
+    "project_id": "pips-cloud",
+    "storage_bucket": "pips-cloud.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:929803975487:android:f34d6c92ce1ca4dc17318a",
+        "android_client_info": {
+          "package_name": "com.crossberry.pips"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyAsHIJYfSy3UFiM5TqbUdxjR4bH8Gt7WZs"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
