@@ -1,4 +1,4 @@
-package com.cloudbox.cloudbox
+package com.crossberry.pips
 
 import io.flutter.embedding.android.FlutterActivity
 
