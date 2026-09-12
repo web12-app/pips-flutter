@@ -47,7 +47,7 @@ class HistoryPage extends StatelessWidget {
             if (s.connectionState != ConnectionState.done) return const Loading();
             final items = (s.data ?? []).map((e) => Entry(Map<String, dynamic>.from(e as Map))).toList();
             if (items.isEmpty) return const EmptyState(icon: '🕓', text: 'No uploads yet.');
-            return ListView.builder(itemCount: items.length, itemBuilder: (_, i) => fileTile(context, items[i], () {}));
+            return ListView.builder(itemCount: items.length, itemBuilder: (_, i) => fileTile(context, items[i], () {}, gallery: items));
           },
         ),
       );
@@ -76,7 +76,7 @@ class _SearchPageState extends State<SearchPage> {
             final files = ((r['files'] ?? r['results'] ?? const []) as List).map((e) => Entry(Map<String, dynamic>.from(e as Map))).toList();
             return ListView(children: [
               if (files.isEmpty && (r['channels'] as List?)?.isNotEmpty != true) const EmptyState(icon: '🔍', text: 'Nothing found.'),
-              ...files.map((e) => fileTile(context, e, () {})),
+              ...files.map((e) => fileTile(context, e, () {}, gallery: files)),
               if ((r['channels'] as List?)?.isNotEmpty == true) ...[
                 const SectionTitle('Channels'),
                 ...(r['channels'] as List).map((c) { final m = Map<String, dynamic>.from(c as Map); return ListTile(leading: const Icon(Icons.tv), title: Text((m['name'] ?? '').toString())); }),

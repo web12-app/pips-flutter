@@ -49,32 +49,33 @@ class _FilesPageState extends State<FilesPage> {
               final items = (s.data ?? []).map((e) => Entry(Map<String, dynamic>.from(e as Map))).toList()
                 ..sort((a, b) => b.uploadedAt.compareTo(a.uploadedAt));
               if (items.isEmpty) return const EmptyState(icon: '📭', text: 'No files found.');
-              return ListView.builder(itemCount: items.length, itemBuilder: (_, i) => fileTile(context, items[i], reload));
+              return ListView.builder(itemCount: items.length, itemBuilder: (_, i) => fileTile(context, items[i], reload, gallery: items));
             },
           )),
         ]),
       );
 }
 
-Widget fileTile(BuildContext context, Entry e, VoidCallback onChanged) {
+Widget fileTile(BuildContext context, Entry e, VoidCallback onChanged, {List<Entry>? gallery}) {
   final m = e.isDb ? const TypeMeta(Icons.table_chart_rounded, Color(0xFFF3E8FF), Color(0xFF7C3AED)) : metaFor(e.mime, e.name);
   return ListTile(
     leading: IconTile(icon: m.icon, bg: m.bg, fg: m.fg),
     title: Text(e.name, maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 14)),
     subtitle: Text('${fmtBytes(e.size)} · ${fmtDate(e.uploadedAt)}${e.visibility == 'private' ? ' · 🔒' : ''}', style: const TextStyle(fontSize: 12)),
     trailing: const Icon(Icons.more_vert, color: Colors.grey),
-    onTap: () => showFileSheet(context, e, onChanged),
+    onTap: () => showFileSheet(context, e, onChanged, gallery: gallery),
   );
 }
 
-Future<void> showFileSheet(BuildContext context, Entry e, VoidCallback onChanged) async {
-  await showSheet(context, FileActions(e: e, onChanged: onChanged));
+Future<void> showFileSheet(BuildContext context, Entry e, VoidCallback onChanged, {List<Entry>? gallery}) async {
+  await showSheet(context, FileActions(e: e, onChanged: onChanged, gallery: gallery));
 }
 
 class FileActions extends StatelessWidget {
   final Entry e;
   final VoidCallback onChanged;
-  const FileActions({super.key, required this.e, required this.onChanged});
+  final List<Entry>? gallery;
+  const FileActions({super.key, required this.e, required this.onChanged, this.gallery});
 
   Future<void> _do(BuildContext context, Future<void> Function() fn) async {
     Navigator.pop(context);
@@ -137,7 +138,7 @@ class FileActions extends StatelessWidget {
     return SafeArea(child: ListView(shrinkWrap: true, children: [
       ListTile(title: Text(e.name, maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontWeight: FontWeight.w800)), subtitle: Text('${fmtBytes(e.size)} · ${priv ? 'Private 🔒' : 'Public 🌐'} · v${e.version}')),
       const Divider(),
-      if (previewable) SheetTile(icon: Icons.play_circle_outline, color: AppTheme.blue, label: 'Play / View', onTap: () { Navigator.pop(context); Navigator.push(context, MaterialPageRoute(builder: (_) => ViewerPage(e: e))); }),
+      if (previewable) SheetTile(icon: Icons.play_circle_outline, color: AppTheme.blue, label: 'Play / View', onTap: () { Navigator.pop(context); Navigator.push(context, MaterialPageRoute(builder: (_) => ViewerPage(e: e, gallery: gallery))); }),
       if (isImage(e.mime, e.name) && !e.isDb) SheetTile(icon: Icons.edit_outlined, color: AppTheme.purple, label: 'Edit image', onTap: () { Navigator.pop(context); Navigator.push(context, MaterialPageRoute(builder: (_) => ImageEditorPage(e: e))); }),
       SheetTile(icon: Icons.download, color: AppTheme.blue, label: 'Download', onTap: () => _download(context)),
       SheetTile(icon: Icons.link, color: AppTheme.teal, label: 'Share link (time-limited)', onTap: () => _shareLink(context)),
@@ -272,7 +273,7 @@ class _FolderPageState extends State<FolderPage> {
             final entries = (tree[widget.folder] ?? tree[''] ?? const []) as List;
             if (entries.isEmpty) return const EmptyState(icon: '📂', text: 'This folder is empty.');
             final items = entries.map((e) => Entry(Map<String, dynamic>.from(e as Map))).toList();
-            return ListView.builder(itemCount: items.length, itemBuilder: (_, i) => fileTile(context, items[i], () => setState(() => refresh = UniqueKey())));
+            return ListView.builder(itemCount: items.length, itemBuilder: (_, i) => fileTile(context, items[i], () => setState(() => refresh = UniqueKey()), gallery: items));
           },
         ),
       );

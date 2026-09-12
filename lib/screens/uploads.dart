@@ -4,13 +4,19 @@ import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import '../api.dart';
 import '../models.dart';
+import '../services/notifications.dart';
 import '../widgets.dart';
 
 class UploadQueue extends ChangeNotifier {
   static final instance = UploadQueue._();
   UploadQueue._();
   final jobs = <UploadJob>[];
-  void add(UploadJob j) { jobs.insert(0, j); notifyListeners(); j.run(notifyListeners); }
+  void add(UploadJob j) {
+    PipsNotify.i.requestPermission(); // Android 13+ POST_NOTIFICATIONS
+    jobs.insert(0, j);
+    notifyListeners();
+    j.run(notifyListeners);
+  }
   void clearFinished() { jobs.removeWhere((j) => j.done || j.failed); notifyListeners(); }
 }
 
@@ -23,6 +29,9 @@ class UploadJob {
   UploadJob({required this.path, required this.name, required this.mime, required this.vis, required this.folder, required this.size});
 
   Future<void> run(void Function() notify) async {
+    final nkey = 'up-$path-$name';
+    final ntf = PipsNotify.i;
+    await ntf.uploadStart(nkey, name);
     try {
       final f = File(path);
       if (size <= PipsApi.singleLimit) {
@@ -40,11 +49,16 @@ class UploadJob {
           progress = min(1, ((i + 1) * PipsApi.chunkSize) / size);
           status = 'Chunk ${i + 1}/$total';
           notify();
+          await ntf.uploadProgress(nkey, name, progress); // background notification
         }
         await PipsApi.uploadFinish(id, total, size, name, mime, vis);
       }
       status = 'Done ✓'; done = true;
-    } on ApiException catch (e) { status = e.message; failed = true; }
+      await ntf.uploadEnd(nkey, name, ok: true, message: 'Uploaded to Pips cloud');
+    } on ApiException catch (e) {
+      status = e.message; failed = true;
+      await ntf.uploadEnd(nkey, name, ok: false, message: e.message);
+    }
     notify();
   }
 }

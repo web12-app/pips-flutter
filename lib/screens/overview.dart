@@ -49,7 +49,7 @@ class OverviewPage extends StatelessWidget {
             if (s.connectionState != ConnectionState.done) return const Loading();
             final items = (s.data ?? []).map((e) => Entry(Map<String, dynamic>.from(e as Map))).toList();
             if (items.isEmpty) return const EmptyState(icon: '📭', text: 'No recent files.');
-            return Column(children: items.map((e) => fileTile(context, e, () {})).toList());
+            return Column(children: items.map((e) => fileTile(context, e, () {}, gallery: items)).toList());
           },
         ),
       ]);

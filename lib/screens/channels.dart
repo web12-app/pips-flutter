@@ -179,7 +179,14 @@ class _ChannelPageState extends State<ChannelPage> {
                   title: Text(title.isEmpty ? e.name : title, style: const TextStyle(fontWeight: FontWeight.w600)),
                   subtitle: Text(fmtBytes(e.size)),
                   trailing: widget.mine ? IconButton(icon: const Icon(Icons.remove_circle_outline, color: AppTheme.red, size: 20), onPressed: () async { try { await PipsApi.channelRemoveFile(widget.id, e.id); setState(() => refresh = UniqueKey()); } on ApiException catch (ex) { if (context.mounted) toast(context, ex.message); } }) : null,
-                  onTap: () => showFileSheet(context, e, () => setState(() => refresh = UniqueKey())),
+                  onTap: () => showFileSheet(
+                    context, e,
+                    () => setState(() => refresh = UniqueKey()),
+                    gallery: list.map((f) {
+                      final m = Map<String, dynamic>.from(f as Map);
+                      return Entry(m['file'] is Map ? Map<String, dynamic>.from(m['file'] as Map) : m);
+                    }).toList(),
+                  ),
                 );
               });
             },

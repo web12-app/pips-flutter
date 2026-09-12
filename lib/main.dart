@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'api.dart';
+import 'services/notifications.dart';
 import 'widgets.dart';
 import 'screens/auth.dart';
 import 'screens/overview.dart';
@@ -13,6 +14,7 @@ final themeMode = ValueNotifier(ThemeMode.system);
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  await PipsNotify.i.init();
   await PipsApi.loadSession();
   runApp(const PipsApp());
 }
