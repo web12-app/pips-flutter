@@ -15,7 +15,7 @@ plugins {
 
 android {
     namespace = "com.crossberry.pips"
-    compileSdk = flutter.compileSdkVersion
+    compileSdk = 36
     ndkVersion = flutter.ndkVersion
 
     compileOptions {
