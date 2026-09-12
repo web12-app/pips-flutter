@@ -286,7 +286,7 @@ class _UploadSheetState extends State<UploadSheet> {
   bool busy = false;
   bool started = false; // after Upload -> live progress view
 
-  static const _mimes = {'pdf': 'application/pdf', 'png': 'image/png', 'jpg': 'image/jpeg', 'jpeg': 'image/jpeg', 'gif': 'image/gif', 'webp': 'image/webp', 'mp4': 'video/mp4', 'mov': 'video/quicktime', 'mkv': 'video/x-matroska', 'avi': 'video/x-msvideo', 'mp3': 'audio/mpeg', 'wav': 'audio/wav', 'm4a': 'audio/mp4', 'zip': 'application/zip', 'rar': 'application/vnd.rar', '7z': 'application/x-7z-compressed', 'txt': 'text/plain', 'json': 'application/json', 'csv': 'text/csv', 'doc': 'application/msword', 'docx': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document', 'xls': 'application/vnd.ms-excel', 'xlsx': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'};
+  static const _mimes = {'pdf': 'application/pdf', 'png': 'image/png', 'jpg': 'image/jpeg', 'jpeg': 'image/jpeg', 'gif': 'image/gif', 'webp': 'image/webp', 'heic': 'image/heic', 'heif': 'image/heif', 'avif': 'image/avif', 'mp4': 'video/mp4', 'mov': 'video/quicktime', 'mkv': 'video/x-matroska', 'avi': 'video/x-msvideo', 'webm': 'video/webm', 'm4v': 'video/x-m4v', 'flv': 'video/x-flv', '3gp': 'video/3gpp', 'mpg': 'video/mpeg', 'mpeg': 'video/mpeg', 'wmv': 'video/x-ms-wmv', 'm3u8': 'application/vnd.apple.mpegurl', 'm3u': 'application/vnd.apple.mpegurl', 'mp3': 'audio/mpeg', 'wav': 'audio/wav', 'm4a': 'audio/mp4', 'zip': 'application/zip', 'rar': 'application/vnd.rar', '7z': 'application/x-7z-compressed', 'txt': 'text/plain', 'json': 'application/json', 'csv': 'text/csv', 'doc': 'application/msword', 'docx': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document', 'xls': 'application/vnd.ms-excel', 'xlsx': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'};
 
   static (IconData, Color) iconFor(String name) {
     final ext = name.contains('.') ? name.split('.').last.toLowerCase() : '';
@@ -642,7 +642,7 @@ class _UploadSheetState extends State<UploadSheet> {
       context: context,
       builder: (ctx) => AlertDialog(
         title: const Text('Need help with uploads?'),
-        content: const Text('Pick files from your gallery or documents, or paste a direct file URL under "Import from URL" — URL imports run on the Pips server, so they keep going even if you close the app or go offline. Files larger than 4 MB upload in chunks automatically and continue in the background.'),
+        content: const Text('Pick files from your gallery or documents, or paste a direct file URL under "Import from URL" — every file type is supported (m3u8 / HLS streams, all video formats, images, audio, documents, archives). URL imports run on the Pips server, so they keep going even if you close the app or go offline. Files larger than 4 MB upload in chunks automatically and continue in the background.'),
         actions: [
           TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Close')),
           FilledButton(

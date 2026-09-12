@@ -37,12 +37,22 @@ class CloudType {
   static const other = 'other';
 }
 
-bool isImage(String mime, String name) => mime.startsWith('image/') || ['.jpg', '.jpeg', '.png', '.gif', '.webp', '.bmp', '.heic'].any(name.toLowerCase().endsWith);
-bool isVideo(String mime, String name) => mime.startsWith('video/') || ['.mp4', '.mkv', '.webm', '.mov', '.avi'].any(name.toLowerCase().endsWith);
+bool isImage(String mime, String name) =>
+    mime.startsWith('image/') || ['.jpg', '.jpeg', '.png', '.gif', '.webp', '.bmp', '.heic', '.heif', '.avif'].any(name.toLowerCase().endsWith);
+
+bool isVideo(String mime, String name) {
+  final m = mime.toLowerCase();
+  final n = name.toLowerCase();
+  // video/* plus HLS / DASH playlist mimes (URL imports store m3u8 as
+  // application/vnd.apple.mpegurl — ExoPlayer streams HLS natively)
+  if (m.startsWith('video/') || m.contains('mpegurl') || m.contains('dash+xml')) return true;
+  return ['.mp4', '.mkv', '.webm', '.mov', '.avi', '.m3u8', '.m3u', '.m4v', '.flv', '.3gp', '.mpg', '.mpeg', '.wmv'].any(n.endsWith);
+}
 bool isAudio(String mime, String name) => mime.startsWith('audio/') || ['.mp3', '.wav', '.ogg', '.m4a', '.flac'].any(name.toLowerCase().endsWith);
 bool isTexty(String mime, String name) =>
     mime.startsWith('text/') || mime.contains('json') || mime.contains('javascript') ||
-    ['.txt', '.md', '.json', '.csv', '.log', '.xml', '.html', '.js', '.py', '.dart', '.java', '.kt', '.c', '.cpp', '.sh', '.yaml', '.yml'].any(name.toLowerCase().endsWith);
+    ['.txt', '.md', '.json', '.csv', '.log', '.xml', '.html', '.js', '.py', '.dart', '.java', '.kt', '.c', '.cpp', '.sh', '.yaml', '.yml'].any(name.toLowerCase().endsWith) &&
+    !name.toLowerCase().endsWith('.m3u8') && !name.toLowerCase().endsWith('.m3u');
 
 String typeOf(String mime, String name) {
   if (isImage(mime, name)) return CloudType.image;
