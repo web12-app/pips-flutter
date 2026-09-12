@@ -276,9 +276,7 @@ class _Pick {
   String path;
   final String name, mime;
   int size;
-  final bool isUrl;
-  bool fetching;
-  _Pick({required this.path, required this.name, required this.size, required this.mime, this.isUrl = false, this.fetching = false});
+  _Pick({required this.path, required this.name, required this.size, required this.mime});
 }
 
 class _UploadSheetState extends State<UploadSheet> {
@@ -366,7 +364,7 @@ class _UploadSheetState extends State<UploadSheet> {
   }
 
   void upload() {
-    final ready = items.where((e) => !e.fetching && e.path.isNotEmpty).toList();
+    final ready = items.where((e) => e.path.isNotEmpty).toList();
     if (ready.isEmpty) {
       if (UploadQueue.instance.imports.isNotEmpty) setState(() => started = true);
       return;
@@ -484,7 +482,7 @@ class _UploadSheetState extends State<UploadSheet> {
               )),
               const SizedBox(width: 10),
               Expanded(child: FilledButton(
-                onPressed: (items.any((e) => !e.fetching && e.path.isNotEmpty) || UploadQueue.instance.imports.isNotEmpty) ? upload : null,
+                onPressed: (items.any((e) => e.path.isNotEmpty) || UploadQueue.instance.imports.isNotEmpty) ? upload : null,
                 style: FilledButton.styleFrom(padding: const EdgeInsets.symmetric(vertical: 13), shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12))),
                 child: Text('Upload${items.isEmpty ? '' : ' (${items.length})'}', style: const TextStyle(fontWeight: FontWeight.w700)),
               )),
@@ -548,15 +546,12 @@ class _UploadSheetState extends State<UploadSheet> {
         Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
           Text(e.name, maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 13)),
           const SizedBox(height: 2),
-          Text(e.fetching ? 'Fetching…' : '${fmtBytes(e.size)} · ${e.isUrl ? 'from URL' : 'ready'}', style: const TextStyle(fontSize: 11, color: Colors.grey)),
+          Text('${fmtBytes(e.size)} · ready', style: const TextStyle(fontSize: 11, color: Colors.grey)),
         ])),
-        if (e.fetching)
-          const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2))
-        else
-          GestureDetector(
-            onTap: () => setState(() => items.remove(e)),
-            child: const Icon(Icons.close, size: 18, color: Colors.grey),
-          ),
+        GestureDetector(
+          onTap: () => setState(() => items.remove(e)),
+          child: const Icon(Icons.close, size: 18, color: Colors.grey),
+        ),
       ]),
     );
   }
