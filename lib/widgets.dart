@@ -1,4 +1,6 @@
+import 'dart:typed_data';
 import 'package:flutter/material.dart';
+import 'api.dart';
 
 class AppTheme {
   static const blue = Color(0xFF0B6EF0);
@@ -135,5 +137,45 @@ class Loading extends StatelessWidget {
   Widget build(BuildContext context) => const Padding(
         padding: EdgeInsets.all(32),
         child: Center(child: CircularProgressIndicator()),
+      );
+}
+
+final _fileImgCache = <String, List<int>>{};
+
+/// Fetch (and cache) a small cloud file as image bytes — used for channel logos.
+Future<Uint8List?> loadFileImage(String? id) async {
+  if (id == null || id.isEmpty) return null;
+  final hit = _fileImgCache[id];
+  if (hit != null) return Uint8List.fromList(hit);
+  try {
+    final b = await PipsApi.getBytes(PipsApi.viewUrl(id));
+    if (_fileImgCache.length > 80) _fileImgCache.clear();
+    _fileImgCache[id] = b;
+    return Uint8List.fromList(b);
+  } catch (_) {
+    return null;
+  }
+}
+
+/// Round channel logo — cloud poster image with a letter fallback.
+class ChannelAvatar extends StatelessWidget {
+  final String? fileId;
+  final String name;
+  final double radius;
+  const ChannelAvatar({super.key, this.fileId, required this.name, this.radius = 20});
+  @override
+  Widget build(BuildContext context) => FutureBuilder<Uint8List?>(
+        future: loadFileImage(fileId),
+        builder: (_, s) {
+          final img = s.data;
+          if (img != null) {
+            return CircleAvatar(radius: radius, backgroundColor: AppTheme.purple, foregroundImage: MemoryImage(img));
+          }
+          return CircleAvatar(
+            radius: radius,
+            backgroundColor: AppTheme.purple,
+            child: Text(name.isEmpty ? '?' : name[0].toUpperCase(), style: TextStyle(color: Colors.white, fontSize: radius * 0.85, fontWeight: FontWeight.w700)),
+          );
+        },
       );
 }
