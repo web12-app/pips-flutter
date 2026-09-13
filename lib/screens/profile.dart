@@ -41,9 +41,19 @@ class ProfilePage extends StatelessWidget {
     accountsChanged.value++;
   }
 
+
+  /// Guess image mime from the file extension.
+  String _mimeFor(String name) {
+    final n = name.toLowerCase();
+    if (n.endsWith('.png')) return 'image/png';
+    if (n.endsWith('.webp')) return 'image/webp';
+    if (n.endsWith('.gif')) return 'image/gif';
+    return 'image/jpeg';
+  }
+
   /// Add / update my profile photo (pick from gallery, ≤ 5 MB).
   Future<void> _changePhoto(BuildContext context, String user) async {
-    final r = await FilePicker.platform.pickFiles(type: FilePickerType.image);
+    final r = await FilePicker.platform.pickFiles(type: FileType.image);
     final f = r?.files.first;
     if (f == null || f.path == null) return;
     final file = File(f.path!);
@@ -52,8 +62,8 @@ class ProfilePage extends StatelessWidget {
       return;
     }
     try {
-      await PipsApi.setAvatar(file, f.name, f.mimeType ?? 'image/png');
-      AvatarTile.bust(user);
+      await PipsApi.setAvatar(file, f.name, _mimeFor(f.name));
+      AvatarTile.invalidate(user);
       if (context.mounted) toast(context, 'Profile photo updated ✓');
     } on ApiException catch (e) {
       if (context.mounted) toast(context, e.message);

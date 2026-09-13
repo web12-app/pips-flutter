@@ -330,19 +330,17 @@ Future<Uint8List?> _loadAvatarBytes(String url) async {
   }
 }
 
-static const _avatarColors = [
+const _avatarColors = [
   Color(0xFF0B6EF0), Color(0xFF8B5CF6), Color(0xFFF59E0B),
   Color(0xFF16A34A), Color(0xFFDC2626), Color(0xFF14B8A6), Color(0xFFDB2777),
 ];
 
 /// Round profile photo for a user — cloud photo with a coloured letter fallback.
-/// Pass a non-empty [bust] to force the letter fallback (e.g. after removal).
 class AvatarTile extends StatelessWidget {
   final String username;
   final double radius;
   final String? name;
-  final String bust;
-  const AvatarTile({super.key, required this.username, this.radius = 20, this.name, this.bust = ''});
+  const AvatarTile({super.key, required this.username, this.radius = 20, this.name});
   @override
   Widget build(BuildContext context) {
     final u = username.isEmpty ? '?' : username;
@@ -360,7 +358,6 @@ class AvatarTile extends StatelessWidget {
         );
 
     final keyUrl = _avatarUrlCache[u];
-    if (keyUrl == null && bust.isNotEmpty) return fallback();
     return FutureBuilder<Uint8List?>(
       future: (keyUrl != null
           ? _loadAvatarBytes(keyUrl)
@@ -380,7 +377,7 @@ class AvatarTile extends StatelessWidget {
   }
 
   /// Drop the cached photo for a user (call after updating the profile photo).
-  static void bust(String username) {
+  static void invalidate(String username) {
     _avatarUrlCache.remove(username);
     _avatarBytesCache.clear();
   }

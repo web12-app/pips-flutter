@@ -131,13 +131,12 @@ class _InboxPageState extends State<InboxPage> {
         ),
         // conversation list
         Expanded(
-          child: FutureBuilder<List<dynamic>>(
+          child: FutureBuilder<List<Map<String, dynamic>>>(
             key: refresh,
             future: _inboxData(),
             builder: (_, s) {
               if (s.connectionState != ConnectionState.done) return const SkeletonScreen();
-              final items = (s.data ?? []).where((r) {
-                final m = Map<String, dynamic>.from(r as Map);
+              final items = (s.data ?? const <Map<String, dynamic>>[]).where((m) {
                 final peer = (m['peer'] ?? '').toString().toLowerCase();
                 if (q.isNotEmpty && !peer.contains(q.toLowerCase()) && !(m['last'] ?? '').toString().toLowerCase().contains(q.toLowerCase())) return false;
                 switch (filter) {
@@ -161,7 +160,7 @@ class _InboxPageState extends State<InboxPage> {
               return RefreshIndicator(
                 onRefresh: () async => setState(() => refresh = UniqueKey()),
                 child: ListView.builder(itemCount: items.length, itemBuilder: (_, i) {
-                  final c = Map<String, dynamic>.from(items[i] as Map);
+                  final c = items[i];
                   final peer = (c['peer'] ?? '').toString();
                   final last = (c['last'] ?? '').toString();
                   final unread = c['unread'] == true ? 1 : (c['unread'] is num ? (c['unread'] as num).toInt() : 0);
@@ -222,20 +221,25 @@ class _InboxPageState extends State<InboxPage> {
   }
 
   /// Inbox + "known" (followed) flag for the Contacts / Unknown chips.
-  Future<List<dynamic>> _inboxData() async {
-    final results = await Future.wait([
-      PipsApi.inbox(),
-      PipsApi.socialUsers('').catchError((_) => <dynamic>[]),
-    ]);
-    final users = results[1] as List;
-    final followed = <String>{for (final u in users) if ((u as Map)['following'] == true) (u['username'] ?? '').toString().toLowerCase()};
-    final list = results[0] as List;
+  Future<List<Map<String, dynamic>>> _inboxData() async {
+    final inbox = await PipsApi.inbox();
+    List<dynamic> users;
+    try {
+      users = await PipsApi.socialUsers('');
+    } catch (_) {
+      users = const [];
+    }
+    final followed = <String>{
+      for (final u in users)
+        if (u is Map && u['following'] == true) (u['username'] ?? '').toString().toLowerCase(),
+    };
     return [
-      for (final r in list)
-        {
-          ...Map<String, dynamic>.from(r as Map),
-          'known': followed.contains((r as Map)['peer']?.toString().toLowerCase() ?? ''),
-        },
+      for (final r in inbox)
+        if (r is Map)
+          {
+            ...Map<String, dynamic>.from(r),
+            'known': followed.contains(((r['peer'] ?? '')).toString().toLowerCase()),
+          },
     ];
   }
 
@@ -266,12 +270,10 @@ class _ChatPageState extends State<ChatPage> {
   final ctrl = TextEditingController();
   Key refresh = UniqueKey();
   bool sending = false;
-  final scrollCtrl = ScrollController();
 
   @override
   void dispose() {
     ctrl.dispose();
-    scrollCtrl.dispose();
     super.dispose();
   }
 
@@ -288,14 +290,15 @@ class _ChatPageState extends State<ChatPage> {
     if (mounted) setState(() => sending = false);
   }
 
-  Future<void> attach([FilePickerType type = FilePickerType.any]) async {
-    final r = await FilePicker.platform.pickFiles(type: type);
+  Future<void> attach({bool imageOnly = false}) async {
+    final r = await FilePicker.platform.pickFiles(type: imageOnly ? FileType.image : null);
     final f = r?.files.first;
     if (f == null || f.path == null) return;
     setState(() => sending = true);
     try {
       final up = await PipsApi.uploadSingle(File(f.path!), f.name, 'application/octet-stream', 'private', (_) {});
-      await PipsApi.sendMessage(widget.peer, '', up['id']?.toString() ?? '');
+      final entry = (up['entry'] ?? up) as Map;
+      await PipsApi.sendMessage(widget.peer, '', (entry['id'] ?? '').toString());
       setState(() => refresh = UniqueKey());
     } on ApiException catch (e) {
       if (mounted) toast(context, e.message);
@@ -420,7 +423,7 @@ class _ChatPageState extends State<ChatPage> {
                 bool dayChanged = !anyPrev || !_sameDay(prevAt!, at);
                 bool newGroup = dayChanged;
                 if (!dayChanged) {
-                  final gapMin = DateTime.parse(at).difference(DateTime.parse(prevAt!)).inMinutes;
+                  final gapMin = DateTime.parse(at).difference(DateTime.parse(prevAt)).inMinutes;
                   newGroup = gapMin > 20;
                 }
                 if (dayChanged) {
@@ -445,10 +448,7 @@ class _ChatPageState extends State<ChatPage> {
                   padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 3),
                   child: Align(
                     alignment: mine ? Alignment.centerRight : Alignment.centerLeft,
-                    child: _bubble(m, mine, dark, () {
-                      final f = m['file'];
-                      if (f is Map) _openFile(Map<String, dynamic>.from(f));
-                    }, onLike: () async {
+                    child: _bubble(m, mine, dark, (f) => _openFile(f), onLike: () async {
                       try {
                         await PipsApi.like(widget.peer, (m['id'] ?? '').toString());
                         if (mounted) setState(() => refresh = UniqueKey());
@@ -488,7 +488,7 @@ class _ChatPageState extends State<ChatPage> {
                         decoration: InputDecoration(border: InputBorder.none, hintText: 'Message…', isDense: true, contentPadding: const EdgeInsets.symmetric(vertical: 12)),
                       ),
                     ),
-                    IconButton(icon: Icon(Icons.photo_camera_outlined, size: 19, color: hc.text2), onPressed: sending ? null : () => attach(FilePickerType.image)),
+                    IconButton(icon: Icon(Icons.photo_camera_outlined, size: 19, color: hc.text2), onPressed: sending ? null : () => attach(imageOnly: true)),
                     IconButton(icon: Icon(Icons.attach_file, size: 18, color: hc.text2), onPressed: sending ? null : () => attach()),
                   ]),
                 ),
