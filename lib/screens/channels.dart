@@ -191,7 +191,7 @@ class _ChannelPageState extends State<ChannelPage> {
             if (s.hasError) return const EmptyState(icon: '⚠️', text: 'Could not load this channel.');
             final ch = s.data?['channel'];
             if (ch is! Map) return const EmptyState(icon: '📺', text: 'Channel not found.');
-            return _body(Map<String, dynamic>.from(ch as Map));
+            return _body(Map<String, dynamic>.from(ch));
           },
         ),
       );
