@@ -347,7 +347,17 @@ class PipsApi {
     final req = http.Request('GET', Uri.parse(url))..headers.addAll(_headers);
     final streamed = await req.send();
     if (!streamed.statusCode.toString().startsWith('2')) {
-      throw ApiException('Download failed (${streamed.statusCode}).', streamed.statusCode);
+      // Surface the server's error message (e.g. secure-play videos in
+      // public channels return 403 "downloads are disabled").
+      var msg = 'Download failed (${streamed.statusCode}).';
+      try {
+        final body = await streamed.stream.bytesToString();
+        final j = json.decode(body);
+        if (j is Map && j['error'] is String && (j['error'] as String).isNotEmpty) {
+          msg = j['error'] as String;
+        }
+      } catch (_) {}
+      throw ApiException(msg, streamed.statusCode);
     }
     final sink = out.openWrite();
     int done = 0;
