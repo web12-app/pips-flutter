@@ -1,6 +1,7 @@
 import 'dart:io';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:share_plus/share_plus.dart';
 import '../api.dart';
@@ -190,6 +191,93 @@ class FileActions extends StatelessWidget {
     await _do(context, () => move ? PipsApi.fileMove(e.id, picked) : PipsApi.fileCopy(e.id, picked));
   }
 
+  String get kindLabel {
+    if (e.isDb) return 'Pips DB document';
+    switch (typeOf(e.mime, e.name)) {
+      case CloudType.image: return 'Image';
+      case CloudType.video: return 'Video';
+      case CloudType.audio: return 'Audio';
+      case CloudType.pdf: return 'PDF document';
+      case CloudType.zip: return 'Archive';
+      case CloudType.doc: return 'Document';
+      case CloudType.design: return 'Design file';
+      default: return 'File';
+    }
+  }
+
+  Widget _propRow(String label, String value, {VoidCallback? onCopy}) => Padding(
+        padding: const EdgeInsets.symmetric(vertical: 5),
+        child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          SizedBox(width: 88, child: Text(label, style: TextStyle(fontSize: 12, color: Colors.grey.shade600, fontWeight: FontWeight.w600))),
+          Expanded(child: SelectableText(value, style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600))),
+          if (onCopy != null)
+            SizedBox(
+              height: 26, width: 26,
+              child: IconButton(padding: EdgeInsets.zero, iconSize: 16, icon: const Icon(Icons.copy), onPressed: onCopy),
+            ),
+        ]),
+      );
+
+  Future<void> _properties(BuildContext context) async {
+    final m = e.isDb ? const TypeMeta(Icons.table_chart_rounded, Color(0xFFF3E8FF), Color(0xFF7C3AED)) : metaFor(e.mime, e.name);
+    await showSheet(
+      context,
+      SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(16, 14, 16, 16),
+          child: Builder(
+            builder: (sctx) => Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Row(children: [
+              IconTile(icon: m.icon, bg: m.bg, fg: m.fg, size: 40),
+              const SizedBox(width: 10),
+              Expanded(child: Text(e.name, maxLines: 2, overflow: TextOverflow.ellipsis, style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 15))),
+            ]),
+            const SizedBox(height: 6),
+            const Divider(),
+            _propRow('File ID', e.id, onCopy: () {
+              Clipboard.setData(ClipboardData(text: e.id));
+              toast(sctx, 'File ID copied');
+            }),
+            _propRow('Kind', kindLabel),
+            _propRow('Type', e.mime.isEmpty ? '—' : e.mime),
+            _propRow('Size', '${fmtBytes(e.size)} (${e.size} bytes)'),
+            _propRow('Folder', e.folder.isEmpty ? 'Root (/)' : e.folder),
+            _propRow('Visibility', e.visibility == 'private' ? 'Private 🔒' : 'Public 🌐'),
+            _propRow('Uploaded', fmtDate(e.uploadedAt)),
+            _propRow('Version', 'v${e.version}'),
+            const SizedBox(height: 10),
+            Row(children: [
+              Expanded(
+                child: OutlinedButton.icon(
+                  onPressed: () {
+                    Clipboard.setData(ClipboardData(text: e.id));
+                    toast(sctx, 'File ID copied');
+                  },
+                  icon: const Icon(Icons.copy, size: 17),
+                  label: const Text('Copy ID'),
+                ),
+              ),
+              if (!e.isDb) ...[
+                const SizedBox(width: 8),
+                Expanded(
+                  child: OutlinedButton.icon(
+                    onPressed: () {
+                      Clipboard.setData(ClipboardData(text: PipsApi.viewUrl(e.id)));
+                      toast(sctx, 'View link copied');
+                    },
+                    icon: const Icon(Icons.link, size: 17),
+                    label: const Text('Copy link'),
+                  ),
+                ),
+              ],
+            ]),
+          ]),
+          ),
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final previewable = isImage(e.mime, e.name) || isVideo(e.mime, e.name) || isAudio(e.mime, e.name) || isTexty(e.mime, e.name);
@@ -198,6 +286,7 @@ class FileActions extends StatelessWidget {
       ListTile(title: Text(e.name, maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontWeight: FontWeight.w800)), subtitle: Text('${fmtBytes(e.size)} · ${priv ? 'Private 🔒' : 'Public 🌐'} · v${e.version}')),
       const Divider(),
       if (previewable) SheetTile(icon: Icons.play_circle_outline, color: AppTheme.blue, label: 'Play / View', onTap: () { Navigator.pop(context); Navigator.push(context, MaterialPageRoute(builder: (_) => ViewerPage(e: e, gallery: gallery))); }),
+      SheetTile(icon: Icons.info_outline, color: AppTheme.teal, label: 'Properties', onTap: () { Navigator.pop(context); _properties(context); }),
       if (isImage(e.mime, e.name) && !e.isDb) SheetTile(icon: Icons.edit_outlined, color: AppTheme.purple, label: 'Edit image', onTap: () { Navigator.pop(context); Navigator.push(context, MaterialPageRoute(builder: (_) => ImageEditorPage(e: e))); }),
       SheetTile(icon: Icons.download, color: AppTheme.blue, label: 'Download', onTap: () => _download(context)),
       SheetTile(icon: Icons.link, color: AppTheme.teal, label: 'Share link (time-limited)', onTap: () => _shareLink(context)),
