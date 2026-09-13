@@ -313,6 +313,29 @@ class PipsApi {
   static Future<Map<String, dynamic>> sendMessage(String to, String text, [String? fileId]) =>
       _req('POST', '$api/social/message', {'to': to, 'text': text, if (fileId != null && fileId.isNotEmpty) 'file_id': fileId});
   static Future<void> like(String peer, String msgId) => _req('POST', '$api/social/like', {'with': peer, 'id': msgId});
+
+  /// Profile photo of [username] (7-day signed URL) or null when unset.
+  static Future<String?> avatarUrl(String username) async {
+    try {
+      final r = await _req('GET', '$api/social/avatar?username=${enc(username)}');
+      final u = (r['url'] ?? '').toString();
+      return u.isEmpty ? null : u;
+    } on ApiException {
+      return null;
+    }
+  }
+
+  /// Set/replace my profile photo from an image file (≤ 5 MB).
+  static Future<Map<String, dynamic>> setAvatar(File f, String name, String mime) async {
+    final bytes = await f.readAsBytes();
+    final req = http.MultipartRequest('POST', Uri.parse('$api/social/avatar'));
+    req.headers.addAll(_headers);
+    req.files.add(http.MultipartFile.fromBytes('file', bytes, filename: name, contentType: MediaType.parse(mime.isEmpty ? 'image/png' : mime)));
+    final streamed = await req.send();
+    final resp = await http.Response.fromStream(streamed);
+    if (!resp.statusCode.toString().startsWith('2')) throw _err(resp.body, resp.statusCode);
+    return _json(resp.body);
+  }
   static Future<List<dynamic>> notifications() async {
     final r = await _req('GET', '$api/notifications');
     return r['notifications'] is List ? r['notifications'] : [];

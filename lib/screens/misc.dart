@@ -30,7 +30,11 @@ class _TrashPageState extends State<TrashPage> {
               subtitle: Text(fmtBytes(items[i].size)),
               trailing: Wrap(spacing: 2, children: [
                 IconButton(icon: const Icon(Icons.restore, size: 20), tooltip: 'Restore', onPressed: () async { try { await PipsApi.trashRestore(items[i].id); setState(() => refresh = UniqueKey()); } on ApiException catch (e) { if (context.mounted) toast(context, e.message); } }),
-                IconButton(icon: const Icon(Icons.delete_forever, size: 20, color: AppTheme.red), tooltip: 'Purge forever', onPressed: () async { try { await PipsApi.trashPurge(items[i].id); setState(() => refresh = UniqueKey()); } on ApiException catch (e) { if (context.mounted) toast(context, e.message); } }),
+                IconButton(icon: const Icon(Icons.delete_forever, size: 20, color: AppTheme.red), tooltip: 'Purge forever', onPressed: () async {
+                  final ok = await confirmDelete(context, title: 'Delete "${items[i].name}" forever?', message: 'This cannot be undone — the file is removed permanently.', confirmLabel: 'Yes, delete forever');
+                  if (!ok) return;
+                  try { await PipsApi.trashPurge(items[i].id); setState(() => refresh = UniqueKey()); } on ApiException catch (e) { if (context.mounted) toast(context, e.message); }
+                }),
               ]),
             ));
           },

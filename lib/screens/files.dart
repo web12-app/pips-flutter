@@ -308,7 +308,7 @@ class FileActions extends StatelessWidget {
       ],
       SheetTile(icon: Icons.history, color: AppTheme.purple, label: 'Version history & restore', onTap: () { Navigator.pop(context); Navigator.push(context, MaterialPageRoute(builder: (_) => VersionsPage(e: e, onChanged: onChanged))); }),
       SheetTile(icon: Icons.delete_outline, color: AppTheme.red, label: 'Delete', onTap: () async {
-        final ok = await showDialog<bool>(context: context, builder: (ctx) => AlertDialog(title: Text('Delete "${e.name}"?'), actions: [TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')), FilledButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('Delete'))]));
+        final ok = await confirmDelete(context, title: 'Delete "${e.name}"?', message: 'It moves to trash first — you can restore it later from the trash.', confirmLabel: 'Yes, delete');
         if (ok == true) await _do(context, () => PipsApi.deleteFile(e.id));
       }),
     ]));
@@ -386,7 +386,12 @@ class _FoldersPageState extends State<FoldersPage> {
                 title: Text(name, style: const TextStyle(fontWeight: FontWeight.w600)),
                 trailing: PopupMenuButton<String>(onSelected: (a) async {
                   try {
-                    if (a == 'del') { await PipsApi.deleteFolder(id); setState(() => refresh = UniqueKey()); }
+                    if (a == 'del') {
+                      final ok = await confirmDelete(context, title: 'Delete folder "$name"?', message: 'Files inside stay safe — only the folder is removed.', confirmLabel: 'Yes, delete');
+                      if (!ok) return;
+                      await PipsApi.deleteFolder(id);
+                      setState(() => refresh = UniqueKey());
+                    }
                     if (a == 'ren') {
                       final c = TextEditingController(text: name);
                       final n = await showDialog<String>(context: context, builder: (ctx) => AlertDialog(title: const Text('Rename folder'), content: TextField(controller: c), actions: [TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')), FilledButton(onPressed: () => Navigator.pop(ctx, c.text.trim()), child: const Text('Save'))]));
@@ -642,7 +647,11 @@ class _CloudExplorerPageState extends State<CloudExplorerPage> {
       subtitle: Text('$n file${n == 1 ? '' : 's'}', style: const TextStyle(fontSize: 12)),
       trailing: PopupMenuButton<String>(
         tooltip: 'Folder options',
-        onSelected: (a) {
+        onSelected: (a) async {
+          if (a == 'del') {
+            final ok = await confirmDelete(context, title: 'Delete folder "$name"?', message: 'Only the folder is removed — files inside keep their places.', confirmLabel: 'Yes, delete');
+            if (!ok) return;
+          }
           _lastMenuAction = a;
           _folderMenu(context, f);
         },

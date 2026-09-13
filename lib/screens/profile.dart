@@ -1,3 +1,5 @@
+import 'dart:io';
+import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:url_launcher/url_launcher.dart';
@@ -31,10 +33,31 @@ class ProfilePage extends StatelessWidget {
     })));
   }
 
-  /// Remove a saved account from the switcher.
-  Future<void> _remove(String user) async {
+  /// Remove a saved account from the switcher (yes/no confirm first).
+  Future<void> _remove(BuildContext context, String user) async {
+    final ok = await confirmDelete(context, title: 'Remove @${user} from this device?', message: 'Its saved session is discarded. You can sign back in anytime.', confirmLabel: 'Yes, remove');
+    if (!ok) return;
     await PipsApi.removeAccount(user);
     accountsChanged.value++;
+  }
+
+  /// Add / update my profile photo (pick from gallery, ≤ 5 MB).
+  Future<void> _changePhoto(BuildContext context, String user) async {
+    final r = await FilePicker.platform.pickFiles(type: FilePickerType.image);
+    final f = r?.files.first;
+    if (f == null || f.path == null) return;
+    final file = File(f.path!);
+    if (file.lengthSync() > 5 * 1024 * 1024) {
+      if (context.mounted) toast(context, 'Photo must be under 5 MB.');
+      return;
+    }
+    try {
+      await PipsApi.setAvatar(file, f.name, f.mimeType ?? 'image/png');
+      AvatarTile.bust(user);
+      if (context.mounted) toast(context, 'Profile photo updated ✓');
+    } on ApiException catch (e) {
+      if (context.mounted) toast(context, e.message);
+    }
   }
 
   Future<void> _report(BuildContext context) async {
@@ -66,15 +89,21 @@ class ProfilePage extends StatelessWidget {
             final user = (a['username'] ?? PipsApi.username ?? '').toString();
             final email = (a['email'] ?? '').toString();
             return Column(children: [
-              Container(
-                width: 84, height: 84,
-                padding: const EdgeInsets.all(14),
-                decoration: BoxDecoration(
-                  color: HomeColors.of(context).surfaceSoft,
-                  shape: BoxShape.circle,
-                  border: Border.all(color: HomeColors.of(context).line, width: 2),
-                ),
-                child: Image.asset('assets/logo.png', fit: BoxFit.contain),
+              GestureDetector(
+                onTap: () => _changePhoto(context, user),
+                child: Stack(children: [
+                  AvatarTile(username: user, radius: 42),
+                  Positioned(
+                    right: 0,
+                    bottom: 0,
+                    child: Container(
+                      width: 27,
+                      height: 27,
+                      decoration: BoxDecoration(color: AppTheme.blue, shape: BoxShape.circle, border: Border.all(color: Theme.of(context).scaffoldBackgroundColor, width: 2)),
+                      child: const Icon(Icons.camera_alt, size: 15, color: Colors.white),
+                    ),
+                  ),
+                ]),
               ),
               const SizedBox(height: 10),
               Text(user.isEmpty ? 'Account' : '@$user', style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 18)),
@@ -177,7 +206,7 @@ class ProfilePage extends StatelessWidget {
                   IconButton(
                     tooltip: 'Remove from switcher',
                     icon: const Icon(Icons.close, size: 17),
-                    onPressed: () => _remove(a['username']!),
+                    onPressed: () => _remove(context, a['username']!),
                   ),
                 ],
               ]),
@@ -321,7 +350,11 @@ class _ApiKeysPageState extends State<ApiKeysPage> {
                 leading: const Icon(Icons.key, color: AppTheme.blue),
                 title: Text((k['label'] ?? 'key').toString()),
                 subtitle: Text(fmtDate(k['created_at']?.toString())),
-                trailing: IconButton(icon: const Icon(Icons.delete_outline, color: AppTheme.red), onPressed: () async { try { await PipsApi.revokeKey(id); setState(() => refresh = UniqueKey()); } on ApiException catch (e) { if (context.mounted) toast(context, e.message); } }),
+                trailing: IconButton(icon: const Icon(Icons.delete_outline, color: AppTheme.red), onPressed: () async {
+                  final ok = await confirmDelete(context, title: 'Revoke this API key?', message: 'Anything using this key stops working immediately.', confirmLabel: 'Yes, revoke');
+                  if (!ok) return;
+                  try { await PipsApi.revokeKey(id); setState(() => refresh = UniqueKey()); } on ApiException catch (e) { if (context.mounted) toast(context, e.message); }
+                }),
               );
             });
           },
