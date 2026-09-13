@@ -631,7 +631,6 @@ class _CloudExplorerPageState extends State<CloudExplorerPage> {
   Widget _folderTile(HomeColors hc, Map<String, dynamic> f, List<dynamic> filesIn) {
     final fp = (f['path'] ?? f['name'] ?? '').toString();
     final name = fp.split('/').last;
-    final id = (f['id'] ?? '').toString();
     final n = filesIn.length;
     return ListTile(
       leading: const IconTile(icon: Icons.folder_rounded, bg: Color(0xFFFEF3C7), fg: Color(0xFFD97706)),
