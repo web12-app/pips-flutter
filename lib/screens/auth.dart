@@ -1,12 +1,15 @@
 import 'dart:async';
+import 'package:firebase_auth/firebase_auth.dart' as fa;
 import 'package:flutter/material.dart';
 import '../api.dart';
+import '../services/github.dart';
 import '../services/google.dart';
 import '../widgets.dart';
 
-/// Login + signup with email/password and "Continue with Google" (Firebase),
-/// plus a 4-step signup wizard (username -> email+method -> OTP/magic-link
-/// verify -> password). Port of pips-android auth.
+/// Login + signup with email/password, "Continue with Google" and
+/// "Continue with GitHub" (Firebase), plus a 4-step signup wizard
+/// (username -> email+method -> OTP/magic-link verify -> password).
+/// "Continue as guest" creates an instant guest_<hex> cloud.
 class AuthScreen extends StatefulWidget {
   final VoidCallback onAuthed;
   const AuthScreen({super.key, required this.onAuthed});
@@ -17,10 +20,11 @@ class AuthScreen extends StatefulWidget {
 
 class _AuthScreenState extends State<AuthScreen> {
   bool signup = false;
-  String? googleEmail; // set when a Google-driven signup wizard opens
+  String? googleEmail; // set when an OAuth-driven (Google/GitHub) signup wizard opens
+  String oauthKind = 'google'; // google | github
   final userCtrl = TextEditingController();
   final passCtrl = TextEditingController();
-  bool busy = false, gBusy = false;
+  bool busy = false, gBusy = false, ghBusy = false, guestBusy = false;
   String? error;
 
   Future<void> _run(Future<void> Function() fn) async {
@@ -52,19 +56,63 @@ class _AuthScreenState extends State<AuthScreen> {
         return;
       }
       if (!mounted) return;
-      setState(() { signup = true; googleEmail = email; });
+      setState(() { signup = true; googleEmail = email; oauthKind = 'google'; });
     } on ApiException catch (e) {
       setState(() => error = e.message);
     } catch (_) {
-      setState(() => error = 'Google sign-in failed. Add this app\'s SHA-1 to the Firebase console (Project pips-cloud) and retry.');
+      setState(() => error = 'Google sign-in failed. Make sure the Google provider is enabled in the Firebase console (Project pips-cloud).');
     } finally {
       if (mounted) setState(() => gBusy = false);
     }
   }
 
+  /// Firebase GitHub sign-in (WebView bridge) -> silent Pips login, else
+  /// prefilled signup.
+  Future<void> github() async {
+    setState(() { ghBusy = true; error = null; });
+    try {
+      final r = await GithubAuth.signIn(context);
+      if (r == null) return; // closed the WebView
+      final email = (r['email'] ?? '').trim();
+      if (email.isEmpty) {
+        setState(() => error = 'GitHub sign-in did not return a verified email.');
+        return;
+      }
+      if (await GoogleAuth.tryStoredLogin(email)) {
+        widget.onAuthed();
+        return;
+      }
+      if (!mounted) return;
+      setState(() { signup = true; googleEmail = email; oauthKind = 'github'; });
+    } on ApiException catch (e) {
+      setState(() => error = e.message);
+    } catch (e) {
+      setState(() => error = 'GitHub sign-in failed. One-time setup: add pips-next.vercel.app to Firebase Authentication → Settings → Authorized domains. (${e.toString().split("(").first.trim()})');
+    } finally {
+      if (mounted) setState(() => ghBusy = false);
+    }
+  }
+
+  /// Firebase anonymous sign-in + instant guest account.
+  Future<void> guest() async {
+    setState(() { guestBusy = true; error = null; });
+    try {
+      try { await fa.FirebaseAuth.instance.signInAnonymously(); } catch (_) {}
+      await PipsApi.guest();
+      if (!mounted) return;
+      widget.onAuthed();
+    } on ApiException catch (e) {
+      setState(() => error = e.message);
+    } catch (_) {
+      setState(() => error = 'Could not start a guest session — check your connection.');
+    } finally {
+      if (mounted) setState(() => guestBusy = false);
+    }
+  }
+
   void backFromSignup() {
     if (googleEmail != null) GoogleAuth.signOut();
-    setState(() { signup = false; googleEmail = null; error = null; });
+    setState(() { signup = false; googleEmail = null; oauthKind = 'google'; error = null; });
   }
 
   @override
@@ -105,6 +153,7 @@ class _AuthScreenState extends State<AuthScreen> {
                           onDone: widget.onAuthed,
                           onBack: backFromSignup,
                           googleEmail: googleEmail,
+                          oauthKind: oauthKind,
                         )
                       : Container(
                           key: const ValueKey('li'),
@@ -136,7 +185,7 @@ class _AuthScreenState extends State<AuthScreen> {
                             Align(
                               alignment: Alignment.centerRight,
                               child: TextButton(
-                                onPressed: busy || gBusy ? null : () => _forgot(context),
+                                onPressed: busy || gBusy || ghBusy || guestBusy ? null : () => _forgot(context),
                                 child: const Text('Forgot password?', style: TextStyle(fontSize: 13)),
                               ),
                             ),
@@ -144,7 +193,7 @@ class _AuthScreenState extends State<AuthScreen> {
                               width: double.infinity,
                               child: FilledButton(
                                 style: FilledButton.styleFrom(padding: const EdgeInsets.symmetric(vertical: 14), shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12))),
-                                onPressed: busy || gBusy ? null : login,
+                                onPressed: busy || gBusy || ghBusy || guestBusy ? null : login,
                                 child: busy ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white)) : const Text('Log in', style: TextStyle(fontWeight: FontWeight.w700, fontSize: 15)),
                               ),
                             ),
@@ -167,14 +216,38 @@ class _AuthScreenState extends State<AuthScreen> {
                                   side: const BorderSide(color: Color(0xFFDCE4EE)),
                                   backgroundColor: Colors.white,
                                 ),
-                                onPressed: busy || gBusy ? null : google,
+                                onPressed: busy || gBusy || ghBusy || guestBusy ? null : google,
                                 icon: gBusy
                                     ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2))
                                     : Image.asset('assets/google_g.png', width: 21, height: 21),
                                 label: const Text('Continue with Google', style: TextStyle(fontWeight: FontWeight.w700, fontSize: 14.5, color: Color(0xFF1F2937))),
                               ),
                             ),
-                            const SizedBox(height: 14),
+                            const SizedBox(height: 10),
+                            SizedBox(
+                              width: double.infinity,
+                              child: FilledButton.icon(
+                                style: FilledButton.styleFrom(
+                                  padding: const EdgeInsets.symmetric(vertical: 13),
+                                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                                  backgroundColor: const Color(0xFF171B21),
+                                  foregroundColor: Colors.white,
+                                ),
+                                onPressed: busy || gBusy || ghBusy || guestBusy ? null : github,
+                                icon: ghBusy
+                                    ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
+                                    : Image.asset('assets/github_mark_w.png', width: 21, height: 21),
+                                label: const Text('Continue with GitHub', style: TextStyle(fontWeight: FontWeight.w700, fontSize: 14.5)),
+                              ),
+                            ),
+                            const SizedBox(height: 4),
+                            TextButton(
+                              onPressed: busy || gBusy || ghBusy || guestBusy ? null : guest,
+                              child: guestBusy
+                                  ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2))
+                                  : const Text('Continue as guest', style: TextStyle(fontWeight: FontWeight.w700, fontSize: 13.5, color: Colors.grey)),
+                            ),
+                            const SizedBox(height: 2),
                             Row(mainAxisAlignment: MainAxisAlignment.center, children: [
                               const Text('New to Pips?', style: TextStyle(color: Colors.grey, fontSize: 13.5)),
                               TextButton(
@@ -233,8 +306,9 @@ class _AuthScreenState extends State<AuthScreen> {
 class SignupWizard extends StatefulWidget {
   final VoidCallback onDone;
   final VoidCallback onBack;
-  final String? googleEmail; // non-null -> Google-driven signup
-  const SignupWizard({super.key, required this.onDone, required this.onBack, this.googleEmail});
+  final String? googleEmail; // non-null -> OAuth-driven signup (Google/GitHub)
+  final String oauthKind; // google | github
+  const SignupWizard({super.key, required this.onDone, required this.onBack, this.googleEmail, this.oauthKind = 'google'});
   @override
   State<SignupWizard> createState() => _SignupWizardState();
 }
@@ -253,6 +327,7 @@ class _SignupWizardState extends State<SignupWizard> {
   Timer? _poll;
 
   bool get googleMode => widget.googleEmail != null;
+  String get providerLabel => widget.oauthKind == 'github' ? 'GitHub' : 'Google';
 
   @override
   void initState() {
@@ -333,8 +408,8 @@ class _SignupWizardState extends State<SignupWizard> {
   @override
   Widget build(BuildContext context) {
     final titles = [
-      googleMode ? 'Create account with Google' : 'Choose a username',
-      googleMode ? 'Confirm your Google email' : 'Your email',
+      googleMode ? 'Create account with $providerLabel' : 'Choose a username',
+      googleMode ? 'Confirm your $providerLabel email' : 'Your email',
       'Check your inbox',
       'Set a password',
     ];
@@ -362,7 +437,9 @@ class _SignupWizardState extends State<SignupWizard> {
               padding: const EdgeInsets.all(12),
               decoration: BoxDecoration(color: const Color(0xFFF1F5FF), borderRadius: BorderRadius.circular(12)),
               child: Row(children: [
-                Image.asset('assets/google_g.png', width: 26, height: 26),
+                widget.oauthKind == 'github'
+                    ? Image.asset('assets/github_mark.png', width: 26, height: 26)
+                    : Image.asset('assets/google_g.png', width: 26, height: 26),
                 const SizedBox(width: 10),
                 Expanded(
                   child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
@@ -373,7 +450,7 @@ class _SignupWizardState extends State<SignupWizard> {
               ]),
             ),
             const SizedBox(height: 12),
-            const Text('We\'ll verify this email with a one-time code sent to your Gmail inbox.', style: TextStyle(color: Colors.grey, fontSize: 13, height: 1.5)),
+            const Text('We\'ll verify this email with a one-time code sent to your inbox.', style: TextStyle(color: Colors.grey, fontSize: 13, height: 1.5)),
             const SizedBox(height: 14),
           ] else ...[
             TextField(controller: emailCtrl, keyboardType: TextInputType.emailAddress, decoration: _d('Email address', Icons.email_outlined)),
@@ -406,7 +483,7 @@ class _SignupWizardState extends State<SignupWizard> {
           ],
         ] else ...[
           if (googleMode)
-            const Text('This password signs you in with one tap next time you use Continue with Google.', style: TextStyle(color: Colors.grey, fontSize: 13, height: 1.5)),
+            Text('This password signs you in with one tap next time you use Continue with $providerLabel.', style: const TextStyle(color: Colors.grey, fontSize: 13, height: 1.5)),
           if (googleMode) const SizedBox(height: 12),
           TextField(controller: passCtrl, obscureText: true, decoration: _d('Password (min 6 chars)', Icons.lock_outline)),
           const SizedBox(height: 12),

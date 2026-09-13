@@ -12,7 +12,20 @@
           "package_name": "com.crossberry.pips"
         }
       },
-      "oauth_client": [],
+      "oauth_client": [
+        {
+          "client_id": "929803975487-t0b2rp9bp6igj7q6aegprh219o47e7tk.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.crossberry.pips",
+            "certificate_hash": "516e4e22d298fc9f878d625b6b872c1903292272"
+          }
+        },
+        {
+          "client_id": "929803975487-sj1r7lr7jcd6v1obc3f2ivkempj4oblp.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
       "api_key": [
         {
           "current_key": "AIzaSyAsHIJYfSy3UFiM5TqbUdxjR4bH8Gt7WZs"
@@ -20,7 +33,12 @@
       ],
       "services": {
         "appinvite_service": {
-          "other_platform_oauth_client": []
+          "other_platform_oauth_client": [
+            {
+              "client_id": "929803975487-sj1r7lr7jcd6v1obc3f2ivkempj4oblp.apps.googleusercontent.com",
+              "client_type": 3
+            }
+          ]
         }
       }
     }

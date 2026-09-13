@@ -50,7 +50,7 @@ class PipsApi {
 
   static Map<String, String> get _headers => {
         if (session != null && session!.isNotEmpty) 'Cookie': 'pips_session=$session',
-        'User-Agent': 'PipsApp/3.9 (Flutter)',
+        'User-Agent': 'PipsApp/3.10 (Flutter)',
       };
 
   static Map<String, String> get authHeaders => _headers;
@@ -141,6 +141,19 @@ class PipsApi {
   static Future<void> logout() async {
     try { await _req('POST', '$api/logout', {}); } catch (_) {}
     await _saveSession(null, null);
+  }
+
+  /// Creates an instant guest account (after Firebase anonymous sign-in) and
+  /// signs into it — same Set-Cookie flow as [login].
+  static Future<void> guest() async {
+    final resp = await http.post(Uri.parse('$api/guest'),
+        headers: {..._headers, 'Content-Type': 'application/json'},
+        body: jsonEncode({}));
+    if (!resp.statusCode.toString().startsWith('2')) throw _err(resp.body, resp.statusCode);
+    final cookie = _extractSession(resp.headers['set-cookie'] ?? '');
+    if (cookie == null) throw ApiException('No session returned — try again.', 0);
+    final j = _json(resp.body);
+    await _saveSession(cookie, (j['username'] ?? 'guest').toString());
   }
 
   static Future<Map<String, dynamic>> checkUsername(String u) => _req('GET', '$api/account/check?username=${enc(u)}');
