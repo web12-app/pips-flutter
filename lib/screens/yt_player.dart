@@ -394,7 +394,7 @@ class _ChannelVideoPageState extends State<ChannelVideoPage> {
             label: const Text('Copy link', style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.w700)),
             visualDensity: VisualDensity.compact,
             onPressed: () {
-              Clipboard.setData(ClipboardData(text: '${PipsApi.base}/v/${cur.id}'));
+              Clipboard.setData(ClipboardData(text: shareChannelUrl));
               toast(context, 'Video link copied');
             },
           ),
@@ -456,13 +456,21 @@ class _ChannelVideoPageState extends State<ChannelVideoPage> {
     ];
   }
 
-  /// Share the secure web player link — opens in any browser as an embed
-  /// player; the raw file URL never leaks (short-lived signed stream).
+  /// Web channel UI link: https://…/channel/<slug>/<file_id>
+  /// Opens the app first on mobile (pips:// deep link), otherwise the
+  /// public web channel page with the secure player.
+  String get shareChannelUrl {
+    final slug = curChannelName.toLowerCase().replaceAll(RegExp(r'[^a-z0-9]+'), '_').replaceAll(RegExp(r'^_+|_+$'), '');
+    return '${PipsApi.base}/channel/${slug.isEmpty ? 'v' : slug}/${cur.id}';
+  }
+
+  /// Share the web channel link — opens the Pips app when installed,
+  /// otherwise the public web channel UI (secure short-lived stream).
   Future<void> _shareLink() async {
     try {
-      await Share.share('${PipsApi.base}/v/${cur.id}', subject: curTitle);
+      await Share.share(shareChannelUrl, subject: curTitle);
     } catch (_) {
-      Clipboard.setData(ClipboardData(text: '${PipsApi.base}/v/${cur.id}'));
+      Clipboard.setData(ClipboardData(text: shareChannelUrl));
       if (mounted) toast(context, 'Link copied');
     }
   }

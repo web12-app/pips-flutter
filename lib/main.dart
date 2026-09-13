@@ -1,3 +1,6 @@
+import 'dart:async';
+
+import 'package:app_links/app_links.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -13,10 +16,71 @@ import 'screens/files.dart';
 import 'screens/photos.dart';
 import 'screens/profile.dart';
 import 'screens/uploads.dart';
+import 'screens/yt_player.dart';
 
 final authed = ValueNotifier(PipsApi.session != null && PipsApi.session!.isNotEmpty);
 final themeMode = ValueNotifier(ThemeMode.system);
 final onboardingDone = ValueNotifier(true); // set from prefs in main()
+
+// ---------------------------------------------------------------- deep links
+// Web links point at the Pips app first:
+//   pips://channel/<slug>/<video_id>   (from https://…/channel/<slug>/<video_id>)
+//   pips://                            (generic app open)
+// If the user isn't logged in yet the link is held until auth completes.
+Uri? _pendingPipsLink;
+
+void _handlePipsLink(Uri? link) {
+  if (link == null || link.scheme != 'pips') return;
+  final parts = link.pathSegments;
+  if (parts.isEmpty || parts.first != 'channel' || parts.length < 3) return; // pips:// → just open the app
+  final slug = Uri.decodeComponent(parts[1]);
+  final videoId = Uri.decodeComponent(parts[2]);
+  if (!authed.value) {
+    _pendingPipsLink = Uri.parse('pips://channel/$slug/$videoId');
+    return;
+  }
+  _openChannelVideoDeepLink(slug, videoId);
+}
+
+void _flushPendingPipsLink() {
+  final link = _pendingPipsLink;
+  if (link == null) return;
+  if (!authed.value) return; // still not logged in — keep waiting for onAuthed
+  _pendingPipsLink = null;
+  final parts = link.pathSegments;
+  _openChannelVideoDeepLink(Uri.decodeComponent(parts[1]), Uri.decodeComponent(parts[2]));
+}
+
+Future<void> _openChannelVideoDeepLink(String slug, String videoId) async {
+  try {
+    final res = await PipsApi.channelGet(slug); // backend resolves id, name or slug
+    final ch = res['channel'] is Map ? Map<String, dynamic>.from(res['channel'] as Map) : <String, dynamic>{};
+    final files = (ch['files'] is List ? ch['files'] as List : const []).cast<Map<String, dynamic>>();
+    final match = files.cast<Map<String, dynamic>>().where((f) => (f['file_id'] ?? '').toString() == videoId).firstOrNull;
+    if (match == null) return; // video not in this channel (or removed)
+    final item = ChanItem.fromRaw(match);
+    final poster = ch['poster'];
+    final logoId = poster is Map && poster['id'] != null ? poster['id'].toString() : null;
+    for (var attempt = 0; attempt < 6; attempt++) {
+      final ctx = navKey.currentContext;
+      if (ctx != null) {
+        Navigator.of(ctx).push(MaterialPageRoute(
+          builder: (_) => ChannelVideoPage(
+            video: item.e,
+            videoTitle: item.title,
+            channelId: (ch['id'] ?? '').toString(),
+            channelName: (ch['name'] ?? '').toString(),
+            channelOwner: (ch['owner'] ?? '').toString(),
+            channelLogoId: logoId,
+            related: files.map(ChanItem.fromRaw).toList(),
+          ),
+        ));
+        return;
+      }
+      await Future<void>.delayed(const Duration(milliseconds: 400));
+    }
+  } catch (_) { /* deep link failure never crashes the app */ }
+}
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -32,6 +96,10 @@ void main() async {
     onboardingDone.value = p.getBool('onboarding_done') ?? false;
   } catch (_) {}
   runApp(const PipsApp());
+  // deep links: live links + the one that launched the app
+  unawaited(onAppLink().listen(_handlePipsLink));
+  unawaited(AppLinks.getInitialLink().then(_handlePipsLink));
+  WidgetsBinding.instance.addPostFrameCallback((_) => _flushPendingPipsLink());
 }
 
 class PipsApp extends StatelessWidget {
@@ -58,7 +126,12 @@ class PipsApp extends StatelessWidget {
                   )
                 : ValueListenableBuilder<bool>(
                     valueListenable: authed,
-                    builder: (_, a, __) => a ? const MainShell() : AuthScreen(onAuthed: () => authed.value = true),
+                    builder: (_, a, __) => a
+                        ? const MainShell()
+                        : AuthScreen(onAuthed: () {
+                            authed.value = true;
+                            _flushPendingPipsLink();
+                          }),
                   ),
           ),
         ),
