@@ -1,5 +1,3 @@
-import 'dart:async';
-
 import 'package:app_links/app_links.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:flutter/material.dart';
@@ -21,6 +19,9 @@ import 'screens/yt_player.dart';
 final authed = ValueNotifier(PipsApi.session != null && PipsApi.session!.isNotEmpty);
 final themeMode = ValueNotifier(ThemeMode.system);
 final onboardingDone = ValueNotifier(true); // set from prefs in main()
+
+// Instantiate early (singleton) to catch the very first link on cold start.
+final appLinks = AppLinks();
 
 // ---------------------------------------------------------------- deep links
 // Web links point at the Pips app first:
@@ -62,9 +63,9 @@ Future<void> _openChannelVideoDeepLink(String slug, String videoId) async {
     final poster = ch['poster'];
     final logoId = poster is Map && poster['id'] != null ? poster['id'].toString() : null;
     for (var attempt = 0; attempt < 6; attempt++) {
-      final ctx = navKey.currentContext;
-      if (ctx != null) {
-        Navigator.of(ctx).push(MaterialPageRoute(
+      final nav = navKey.currentState;
+      if (nav != null) {
+        nav.push(MaterialPageRoute(
           builder: (_) => ChannelVideoPage(
             video: item.e,
             videoTitle: item.title,
@@ -84,6 +85,8 @@ Future<void> _openChannelVideoDeepLink(String slug, String videoId) async {
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  // Deep links: uriLinkStream emits the cold-start link too — subscribe first.
+  appLinks.uriLinkStream.listen(_handlePipsLink);
   try {
     await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform);
   } catch (_) {
@@ -96,9 +99,6 @@ void main() async {
     onboardingDone.value = p.getBool('onboarding_done') ?? false;
   } catch (_) {}
   runApp(const PipsApp());
-  // deep links: live links + the one that launched the app
-  unawaited(onAppLink().listen(_handlePipsLink));
-  unawaited(AppLinks.getInitialLink().then(_handlePipsLink));
   WidgetsBinding.instance.addPostFrameCallback((_) => _flushPendingPipsLink());
 }
 
