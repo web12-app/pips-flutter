@@ -14,7 +14,7 @@ class ProfilePage extends StatelessWidget {
   const ProfilePage({super.key});
 
   /// Switch to a previously logged-in account (instant, no re-login).
-  Future<void> _switchTo(String user) async {
+  Future<void> _switchTo(BuildContext context, String user) async {
     try {
       await PipsApi.switchAccount(user);
       restartShell();
@@ -24,7 +24,7 @@ class ProfilePage extends StatelessWidget {
   }
 
   /// Log in a NEW account — after login the app switches to it automatically.
-  void _addAccount() {
+  void _addAccount(BuildContext context) {
     Navigator.push(context, MaterialPageRoute(builder: (_) => AuthScreen(onAuthed: () {
       authed.value = true;
       restartShell();
@@ -85,7 +85,7 @@ class ProfilePage extends StatelessWidget {
         const SizedBox(height: 14),
         ValueListenableBuilder<int>(
           valueListenable: accountsChanged,
-          builder: (_, __, ___) => _accountsCard(),
+          builder: (ctx, __, ___) => _accountsCard(ctx),
         ),
         const SizedBox(height: 12),
         _planCard(context),
@@ -129,7 +129,7 @@ class ProfilePage extends StatelessWidget {
 
   // ------------------------------------------------------------- your plan
   // ---------------------------------------------------------------- accounts
-  Widget _accountsCard() {
+  Widget _accountsCard(BuildContext context) {
     final hc = HomeColors.of(context);
     final current = PipsApi.username ?? '';
     return GlassCard(
@@ -139,7 +139,7 @@ class ProfilePage extends StatelessWidget {
           const SizedBox(width: 8),
           Text('Accounts', style: TextStyle(fontWeight: FontWeight.w800, fontSize: 14.5, color: hc.text1)),
           const Spacer(),
-          TextButton(onPressed: _addAccount, child: const Text('Add account', style: TextStyle(fontWeight: FontWeight.w800, fontSize: 12.5, color: AppTheme.blue))),
+          TextButton(onPressed: () => _addAccount(context), child: const Text('Add account', style: TextStyle(fontWeight: FontWeight.w800, fontSize: 12.5, color: AppTheme.blue))),
         ]),
         if (PipsApi.accounts.isEmpty)
           Padding(
@@ -171,7 +171,7 @@ class ProfilePage extends StatelessWidget {
                   )
                 else ...[
                   TextButton(
-                    onPressed: () => _switchTo(a['username']!),
+                    onPressed: () => _switchTo(context, a['username']!),
                     child: const Text('Switch', style: TextStyle(fontWeight: FontWeight.w800, fontSize: 12.5)),
                   ),
                   IconButton(
