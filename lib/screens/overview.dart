@@ -21,9 +21,11 @@ class _OverviewPageState extends State<OverviewPage> {
 
   @override
   Widget build(BuildContext context) {
-    return RefreshIndicator(
-      onRefresh: () async => setState(() => refresh = UniqueKey()),
-      child: FutureBuilder<List<dynamic>>(
+    return SafeArea(
+      bottom: false, // bottom pill bar already sits in its own SafeArea
+      child: RefreshIndicator(
+        onRefresh: () async => setState(() => refresh = UniqueKey()),
+        child: FutureBuilder<List<dynamic>>(
         key: refresh,
         future: Future.wait<dynamic>([PipsApi.account(), PipsApi.filesAll()]),
         builder: (_, s) {
@@ -56,6 +58,7 @@ class _OverviewPageState extends State<OverviewPage> {
             ],
           );
         },
+        ),
       ),
     );
   }

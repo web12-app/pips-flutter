@@ -31,7 +31,9 @@ class ProfilePage extends StatelessWidget {
   }
 
   @override
-  Widget build(BuildContext context) => ListView(padding: const EdgeInsets.fromLTRB(16, 14, 16, 24), children: [
+  Widget build(BuildContext context) => SafeArea(
+        bottom: false, // bottom pill bar already sits in its own SafeArea
+        child: ListView(padding: const EdgeInsets.fromLTRB(16, 14, 16, 24), children: [
         FutureBuilder<Map<String, dynamic>>(
           future: PipsApi.account(),
           builder: (_, s) {
@@ -75,7 +77,8 @@ class ProfilePage extends StatelessWidget {
           icon: const Icon(Icons.logout),
           label: const Text('Log out'),
         ),
-      ]);
+        ]),
+      );
 
   // ------------------------------------------------------------- your plan
   Widget _planCard(BuildContext context) => Container(
