@@ -110,8 +110,8 @@ class PipsApp extends StatelessWidget {
         builder: (_, mode, __) => MaterialApp(
           title: 'Pips',
           debugShowCheckedModeBanner: false,
-          theme: ThemeData(useMaterial3: true, colorScheme: ColorScheme.fromSeed(seedColor: AppTheme.blue)),
-          darkTheme: ThemeData(useMaterial3: true, colorScheme: ColorScheme.fromSeed(seedColor: AppTheme.blue, brightness: Brightness.dark)),
+          theme: ThemeData(useMaterial3: true, colorScheme: ColorScheme.fromSeed(seedColor: AppTheme.blue), scaffoldBackgroundColor: AppTheme.bg),
+          darkTheme: ThemeData(useMaterial3: true, colorScheme: ColorScheme.fromSeed(seedColor: AppTheme.blue, brightness: Brightness.dark), scaffoldBackgroundColor: const Color(0xFF0B0B0D)),
           themeMode: mode,
           navigatorKey: navKey,
           home: ValueListenableBuilder<bool>(

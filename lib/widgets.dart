@@ -10,6 +10,52 @@ class AppTheme {
   static const green = Color(0xFF16A34A);
   static const red = Color(0xFFDC2626);
   static const teal = Color(0xFF14B8A6);
+
+  // Clear base palette (light)
+  static const bg = Color(0xFFF5F7FB);
+  static const ink = Color(0xFF101828);
+  static const inkSoft = Color(0xFF667085);
+  static const line = Color(0xFFE9EDF3);
+  static const blueSoft = Color(0xFFE8F1FE);
+}
+
+/// Adaptive home colors — one clear look in both light and dark mode.
+class HomeColors {
+  final Color surface;
+  final Color surfaceSoft;
+  final Color text1;
+  final Color text2;
+  final Color line;
+  final Color tabBg;
+  const HomeColors({
+    required this.surface,
+    required this.surfaceSoft,
+    required this.text1,
+    required this.text2,
+    required this.line,
+    required this.tabBg,
+  });
+
+  static HomeColors of(BuildContext context) {
+    final dark = Theme.of(context).brightness == Brightness.dark;
+    return dark
+        ? const HomeColors(
+            surface: Color(0xFF1C1C1E),
+            surfaceSoft: Color(0xFF2C2C2E),
+            text1: Color(0xFFF2F2F7),
+            text2: Color(0xFF98989E),
+            line: Color(0xFF38383A),
+            tabBg: Color(0xFF2C2C2E),
+          )
+        : const HomeColors(
+            surface: Color(0xFFFFFFFF),
+            surfaceSoft: Color(0xFFF2F4F7),
+            text1: Color(0xFF101828),
+            text2: Color(0xFF667085),
+            line: Color(0xFFE9EDF3),
+            tabBg: Color(0xFFF2F4F7),
+          );
+  }
 }
 
 void toast(BuildContext context, String msg) {
@@ -27,16 +73,19 @@ class SectionTitle extends StatelessWidget {
   final Widget? trailing;
   const SectionTitle(this.text, {super.key, this.trailing});
   @override
-  Widget build(BuildContext context) => Padding(
-        padding: const EdgeInsets.fromLTRB(4, 14, 4, 10),
-        child: Row(
-          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-          children: [
-            Text(text, style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 16)),
-            if (trailing != null) trailing!,
-          ],
-        ),
-      );
+  Widget build(BuildContext context) {
+    final hc = HomeColors.of(context);
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(4, 16, 4, 10),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        children: [
+          Text(text, style: TextStyle(fontWeight: FontWeight.w800, fontSize: 16, letterSpacing: -0.2, color: hc.text1)),
+          if (trailing != null) trailing!,
+        ],
+      ),
+    );
+  }
 }
 
 class GlassCard extends StatelessWidget {

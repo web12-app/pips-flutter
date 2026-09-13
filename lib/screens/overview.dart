@@ -36,22 +36,22 @@ class _OverviewPageState extends State<OverviewPage> {
               .map((e) => Entry(Map<String, dynamic>.from(e as Map)))
               .toList()
             ..sort((a, b) => b.uploadedAt.compareTo(a.uploadedAt));
+          final hc = HomeColors.of(context);
           return ListView(
             padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
             children: [
               _header(account),
               const SizedBox(height: 14),
               _searchBar(context),
+              const SizedBox(height: 14),
+              _quickTabs(context),
               const SizedBox(height: 18),
               _videoFeed(),
-              Text('Save with Pips', style: TextStyle(fontSize: 24, fontWeight: FontWeight.w800, color: Colors.grey.shade900)),
+              Text('Save with Pips', style: TextStyle(fontSize: 24, fontWeight: FontWeight.w800, color: hc.text1)),
               const SizedBox(height: 12),
               _recentCard(context, all),
               const SizedBox(height: 12),
               _activityCard(context, all),
-              const SizedBox(height: 6),
-              const SectionTitle('Quick actions'),
-              _quickActions(context),
               const SectionTitle('Recent files'),
               if (all.isEmpty)
                 const EmptyState(icon: '📭', text: 'No files yet — tap + to upload.')
@@ -71,27 +71,28 @@ class _OverviewPageState extends State<OverviewPage> {
     final used = (account['storage_used'] is num ? (account['storage_used'] as num) : 0).toDouble();
     final quota = (account['quota'] is num && (account['quota'] as num) > 0 ? (account['quota'] as num) : 2199023255552).toDouble();
     final pct = quota > 0 ? used / quota : 0.0;
+    final hc = HomeColors.of(context);
     return Row(children: [
       Container(
         width: 46,
         height: 46,
         padding: const EdgeInsets.all(7),
-        decoration: BoxDecoration(color: Colors.white, shape: BoxShape.circle, border: Border.all(color: const Color(0xFFE8EEF6)), boxShadow: [
-          BoxShadow(color: Colors.black.withValues(alpha: 0.05), blurRadius: 8, offset: const Offset(0, 3)),
+        decoration: BoxDecoration(color: hc.surface, shape: BoxShape.circle, border: Border.all(color: hc.line), boxShadow: [
+          BoxShadow(color: Colors.black.withValues(alpha: 0.06), blurRadius: 10, offset: const Offset(0, 3)),
         ]),
         child: Image.asset('assets/logo.png', fit: BoxFit.contain),
       ),
       const SizedBox(width: 10),
       Expanded(
         child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          Text('Hi, $user 👋', maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 17)),
-          Text('Storage used ${(pct * 100).toStringAsFixed(1)}% · ${fmtBytes(used.toInt())}', style: const TextStyle(fontSize: 12, color: Colors.grey)),
+          Text('Hi, $user 👋', maxLines: 1, overflow: TextOverflow.ellipsis, style: TextStyle(fontWeight: FontWeight.w800, fontSize: 17, color: hc.text1)),
+          Text('Storage used ${(pct * 100).toStringAsFixed(1)}% · ${fmtBytes(used.toInt())}', style: TextStyle(fontSize: 12, color: hc.text2)),
         ]),
       ),
       IconButton(
         tooltip: 'Notifications',
         onPressed: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const NotificationsPage())),
-        icon: const Icon(Icons.notifications_outlined, size: 26),
+        icon: Icon(Icons.notifications_outlined, size: 25, color: hc.text1),
       ),
     ]);
   }
@@ -179,19 +180,22 @@ class _OverviewPageState extends State<OverviewPage> {
   }
 
   // ---------------------------------------------------------------- search
-  Widget _searchBar(BuildContext context) => GestureDetector(
-        onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const SearchPage())),
-        child: Container(
-          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 13),
-          decoration: BoxDecoration(color: const Color(0xFFF3F6FA), borderRadius: BorderRadius.circular(14)),
-          child: Row(children: [
-            const Icon(Icons.search, color: Colors.grey, size: 21),
-            const SizedBox(width: 8),
-            Expanded(child: Text('Search files', style: TextStyle(color: Colors.grey.shade500, fontSize: 14))),
-            const Icon(Icons.tune, color: Colors.grey, size: 20),
-          ]),
-        ),
-      );
+  Widget _searchBar(BuildContext context) {
+    final hc = HomeColors.of(context);
+    return GestureDetector(
+      onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const SearchPage())),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 13),
+        decoration: BoxDecoration(color: hc.surface, borderRadius: BorderRadius.circular(14), border: Border.all(color: hc.line)),
+        child: Row(children: [
+          Icon(Icons.search_rounded, color: hc.text2, size: 20),
+          const SizedBox(width: 9),
+          Expanded(child: Text('Search files', style: TextStyle(color: hc.text2, fontSize: 14))),
+          Icon(Icons.tune_rounded, color: hc.text2, size: 19),
+        ]),
+      ),
+    );
+  }
 
   // ------------------------------------------------- recent files & folders
   Widget _recentCard(BuildContext context, List<Entry> all) {
@@ -200,16 +204,17 @@ class _OverviewPageState extends State<OverviewPage> {
     final projects = all.where((e) => !isVideo(e.mime, e.name) && !isImage(e.mime, e.name)).toList();
     int bytes(List<Entry> l) => l.fold(0, (a, e) => a + e.size);
 
+    final hc = HomeColors.of(context);
     Widget tile(IconData icon, Color bg, Color fg, String title, String sub, VoidCallback onTap) => GestureDetector(
           onTap: onTap,
           child: Container(
             padding: const EdgeInsets.all(12),
-            decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(14)),
+            decoration: BoxDecoration(color: hc.surfaceSoft, borderRadius: BorderRadius.circular(14)),
             child: Column(crossAxisAlignment: CrossAxisAlignment.start, mainAxisAlignment: MainAxisAlignment.center, children: [
               IconTile(icon: icon, bg: bg, fg: fg, size: 36),
               const SizedBox(height: 8),
-              Text(title, maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 12.5)),
-              Text(sub, maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 10.5, color: Colors.grey)),
+              Text(title, maxLines: 1, overflow: TextOverflow.ellipsis, style: TextStyle(fontWeight: FontWeight.w700, fontSize: 12.5, color: hc.text1)),
+              Text(sub, maxLines: 1, overflow: TextOverflow.ellipsis, style: TextStyle(fontSize: 10.5, color: hc.text2)),
             ]),
           ),
         );
@@ -219,18 +224,22 @@ class _OverviewPageState extends State<OverviewPage> {
     return Container(
       padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
-        gradient: const LinearGradient(begin: Alignment.topLeft, end: Alignment.bottomRight, colors: [Color(0xFFC7B9F7), Color(0xFFA78BFA)]),
-        borderRadius: BorderRadius.circular(20),
+        color: hc.surface,
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(color: hc.line),
+        boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.04), blurRadius: 14, offset: const Offset(0, 5))],
       ),
       child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
         Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
-          const Text('Recent Files & Folders', style: TextStyle(fontWeight: FontWeight.w800, fontSize: 14.5, color: Color(0xFF3B2F63))),
+          Text('Recent Files & Folders', style: TextStyle(fontWeight: FontWeight.w800, fontSize: 14.5, color: hc.text1)),
           GestureDetector(
             onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const FilesPage())),
-            child: Container(
-              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
-              decoration: BoxDecoration(color: Colors.white.withValues(alpha: 0.55), borderRadius: BorderRadius.circular(99)),
-              child: const Text('See All', style: TextStyle(fontSize: 11.5, fontWeight: FontWeight.w700, color: Color(0xFF3B2F63))),
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
+              child: Row(children: [
+                const Text('See All', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w800, color: AppTheme.blue)),
+                Icon(Icons.chevron_right_rounded, size: 17, color: AppTheme.blue.withValues(alpha: 0.8)),
+              ]),
             ),
           ),
         ]),
@@ -256,19 +265,22 @@ class _OverviewPageState extends State<OverviewPage> {
   // ---------------------------------------------------------------- activity
   Widget _activityCard(BuildContext context, List<Entry> all) {
     final latest = all.take(3).toList();
+    final hc = HomeColors.of(context);
     return Container(
       padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
-        gradient: const LinearGradient(begin: Alignment.topLeft, end: Alignment.bottomRight, colors: [Color(0xFFFDF0B8), Color(0xFFFBE38A)]),
-        borderRadius: BorderRadius.circular(20),
+        color: hc.surface,
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(color: hc.line),
+        boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.04), blurRadius: 14, offset: const Offset(0, 5))],
       ),
       child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-        const Text('Recent Activity', style: TextStyle(fontWeight: FontWeight.w800, fontSize: 14.5, color: Color(0xFF5C4A0A))),
+        Text('Recent Activity', style: TextStyle(fontWeight: FontWeight.w800, fontSize: 14.5, color: hc.text1)),
         const SizedBox(height: 2),
-        Text('Latest uploads in your cloud show up here.', style: TextStyle(fontSize: 11.5, color: Colors.brown.withValues(alpha: 0.65))),
+        Text('Latest uploads in your cloud show up here.', style: TextStyle(fontSize: 11.5, color: hc.text2)),
         const SizedBox(height: 8),
         if (latest.isEmpty)
-          Text('Nothing yet — upload your first file.', style: TextStyle(fontSize: 12, color: Colors.brown.withValues(alpha: 0.7)))
+          Text('Nothing yet — upload your first file.', style: TextStyle(fontSize: 12, color: hc.text2))
         else
           ...latest.map((e) {
             final m = metaFor(e.mime, e.name);
@@ -277,8 +289,8 @@ class _OverviewPageState extends State<OverviewPage> {
               child: Row(children: [
                 IconTile(icon: m.icon, bg: m.bg, fg: m.fg, size: 30),
                 const SizedBox(width: 8),
-                Expanded(child: Text(e.name, maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 12.5, fontWeight: FontWeight.w600, color: Color(0xFF4A3B08)))),
-                Text(fmtBytes(e.size), style: const TextStyle(fontSize: 11, color: Color(0xFF7A661C))),
+                Expanded(child: Text(e.name, maxLines: 1, overflow: TextOverflow.ellipsis, style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.w600, color: hc.text1))),
+                Text(fmtBytes(e.size), style: TextStyle(fontSize: 11, color: hc.text2)),
               ]),
             );
           }),
@@ -286,10 +298,12 @@ class _OverviewPageState extends State<OverviewPage> {
           alignment: Alignment.centerRight,
           child: GestureDetector(
             onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const HistoryPage())),
-            child: Container(
-              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
-              decoration: BoxDecoration(color: const Color(0xFF3B2F63), borderRadius: BorderRadius.circular(99)),
-              child: const Text('See All', style: TextStyle(color: Colors.white, fontSize: 11.5, fontWeight: FontWeight.w700)),
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
+              child: Row(children: [
+                const Text('See All', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w800, color: AppTheme.blue)),
+                Icon(Icons.chevron_right_rounded, size: 17, color: AppTheme.blue.withValues(alpha: 0.8)),
+              ]),
             ),
           ),
         ),
@@ -297,21 +311,49 @@ class _OverviewPageState extends State<OverviewPage> {
     );
   }
 
-  // ---------------------------------------------------------------- actions
-  Widget _quickActions(BuildContext context) => Wrap(spacing: 8, runSpacing: 8, children: [
-        _chip(context, Icons.add_circle_outline, 'Upload', () => showSheet(context, const UploadSheet())),
-        _chip(context, Icons.tv_outlined, 'Channels', () => Navigator.push(context, MaterialPageRoute(builder: (_) => const ChannelsPage()))),
-        _chip(context, Icons.folder_outlined, 'Folders', () => Navigator.push(context, MaterialPageRoute(builder: (_) => const FoldersPage()))),
-        _chip(context, Icons.delete_outline, 'Trash', () => Navigator.push(context, MaterialPageRoute(builder: (_) => const TrashPage()))),
-        _chip(context, Icons.history, 'History', () => Navigator.push(context, MaterialPageRoute(builder: (_) => const HistoryPage()))),
-        _chip(context, Icons.table_chart_outlined, 'Pips DB', () => Navigator.push(context, MaterialPageRoute(builder: (_) => const DbPage()))),
-        _chip(context, Icons.forum_outlined, 'Messages', () => Navigator.push(context, MaterialPageRoute(builder: (_) => const InboxPage()))),
-        _chip(context, Icons.person_search_outlined, 'Find people', () => Navigator.push(context, MaterialPageRoute(builder: (_) => const UserSearchPage()))),
-      ]);
-
-  Widget _chip(BuildContext context, IconData icon, String label, VoidCallback onTap) => ActionChip(
-        avatar: Icon(icon, size: 18, color: AppTheme.blue),
-        label: Text(label),
-        onPressed: onTap,
+  // --------------------------------------------- quick links — top tab bar
+  /// The quick links live in a top tab bar under the search: a compact,
+  /// horizontal-scroll row of tabs. Upload is the primary (filled) tab.
+  Widget _quickTabs(BuildContext context) => SizedBox(
+        height: 42,
+        child: ListView(
+          scrollDirection: Axis.horizontal,
+          clipBehavior: Clip.hardEdge,
+          padding: EdgeInsets.zero,
+          physics: const BouncingScrollPhysics(),
+          children: [
+            _tab(context, Icons.add_circle_rounded, 'Upload', primary: true, onTap: () => showSheet(context, const UploadSheet())),
+            _tab(context, Icons.tv_rounded, 'Channels', onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const ChannelsPage()))),
+            _tab(context, Icons.folder_rounded, 'Folders', onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const FoldersPage()))),
+            _tab(context, Icons.delete_rounded, 'Trash', onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const TrashPage()))),
+            _tab(context, Icons.history_rounded, 'History', onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const HistoryPage()))),
+            _tab(context, Icons.table_chart_rounded, 'Pips DB', onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const DbPage()))),
+            _tab(context, Icons.forum_rounded, 'Messages', onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const InboxPage()))),
+            _tab(context, Icons.person_search_rounded, 'Find people', onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const UserSearchPage()))),
+          ],
+        ),
       );
+
+  Widget _tab(BuildContext context, IconData icon, String label, {bool primary = false, required VoidCallback onTap}) {
+    final hc = HomeColors.of(context);
+    return Padding(
+      padding: const EdgeInsets.only(right: 8),
+      child: Material(
+        color: primary ? AppTheme.blue : hc.tabBg,
+        borderRadius: BorderRadius.circular(13),
+        child: InkWell(
+          borderRadius: BorderRadius.circular(13),
+          onTap: onTap,
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+            child: Row(mainAxisSize: MainAxisSize.min, children: [
+              Icon(icon, size: 16.5, color: primary ? Colors.white : AppTheme.blue),
+              const SizedBox(width: 6),
+              Text(label, style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700, color: primary ? Colors.white : hc.text1)),
+            ]),
+          ),
+        ),
+      ),
+    );
+  }
 }
