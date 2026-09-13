@@ -211,7 +211,7 @@ class _ChannelPageState extends State<ChannelPage> {
       if (it.e.id.isNotEmpty) items.add(it);
     }
     return ListView(padding: const EdgeInsets.only(bottom: 32), children: [
-      _header(name, desc, owner, posterId, items.length, mine, (ch['visibility'] ?? 'public').toString()),
+      _header(ch, name, desc, owner, posterId, items.length, mine),
       if (mine)
         Padding(
           padding: const EdgeInsets.fromLTRB(12, 4, 12, 8),
@@ -228,7 +228,8 @@ class _ChannelPageState extends State<ChannelPage> {
     ]);
   }
 
-  Widget _header(String name, String desc, String owner, String? posterId, int count, bool mine, String visibility) {
+  Widget _header(Map<String, dynamic> settingsChannel, String name, String desc, String owner, String? posterId, int count, bool mine) {
+    final visibility = (settingsChannel['visibility'] ?? 'public').toString();
     return Container(
       margin: const EdgeInsets.fromLTRB(12, 12, 12, 4),
       padding: const EdgeInsets.all(14),
@@ -252,7 +253,7 @@ class _ChannelPageState extends State<ChannelPage> {
                 if (a == 'del') {
                   await _delete();
                 } else if (a == 'settings') {
-                  final changed = await Navigator.push<bool>(context, MaterialPageRoute(builder: (_) => ChannelSettingsPage(channel: Map<String, dynamic>.of(ch))));
+                  final changed = await Navigator.push<bool>(context, MaterialPageRoute(builder: (_) => ChannelSettingsPage(channel: Map<String, dynamic>.of(settingsChannel))));
                   if (changed == true && mounted) setState(() => refresh = UniqueKey());
                 }
               },

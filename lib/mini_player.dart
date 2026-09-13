@@ -1,7 +1,6 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:video_player/video_player.dart';
-import 'api.dart';
 import 'models.dart';
 import 'widgets.dart';
 import 'screens/yt_player.dart';
@@ -187,8 +186,8 @@ class _MiniCardState extends State<_MiniCard> {
             child: Stack(fit: StackFit.expand, children: [
             Builder(builder: (_) {
               final sz = c.value.size;
-              final vw = (sz?.width ?? 0) > 0 ? sz!.width : 16.0;
-              final vh = (sz?.height ?? 0) > 0 ? sz!.height : 9.0;
+              final vw = sz.width > 0 ? sz.width : 16.0;
+              final vh = sz.height > 0 ? sz.height : 9.0;
               return FittedBox(
                 fit: BoxFit.cover,
                 clipBehavior: Clip.hardEdge,

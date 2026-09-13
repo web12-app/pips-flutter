@@ -90,7 +90,7 @@ class _ChannelVideoPageState extends State<ChannelVideoPage> {
   late String curChannelId = widget.channelId;
   late String curChannelName = widget.channelName;
   late String curChannelOwner = widget.channelOwner;
-  String? curChannelLogoId = widget.channelLogoId;
+  late String? curChannelLogoId = widget.channelLogoId;
   String? err;
   bool controls = true;
   bool muted = false;
