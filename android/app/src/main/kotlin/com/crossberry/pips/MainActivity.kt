@@ -4,7 +4,6 @@ import android.app.PictureInPictureParams
 import android.content.Intent
 import android.content.res.Configuration
 import android.os.Build
-import android.util.Size
 import android.view.WindowManager
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
@@ -49,13 +48,7 @@ class MainActivity : FlutterActivity() {
             setShowWhenLocked(true)
             setTurnScreenOn(true)
 
-            val w = window.decorView.width
-            val h = window.decorView.height
-            val source = Size(if (w > 0) w else 1600, if (h > 0) h else 900)
-            val params = PictureInPictureParams.Builder()
-                .setSourceRect(android.graphics.Rect(0, 0, source.width, source.height))
-                .setAutoEnterEnabled(false)
-                .build()
+            val params = PictureInPictureParams.Builder().build()
             enterPictureInPictureMode(params)
             inPip = true
             true
