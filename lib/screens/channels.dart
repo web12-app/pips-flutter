@@ -25,10 +25,12 @@ String _imgMime(String name) {
 }
 
 class ChannelsPage extends StatelessWidget {
-  const ChannelsPage({super.key});
+  final int initialTab;
+  const ChannelsPage({super.key, this.initialTab = 0});
   @override
   Widget build(BuildContext context) => DefaultTabController(
         length: 2,
+        initialIndex: initialTab < 0 ? 0 : (initialTab > 1 ? 1 : initialTab),
         child: Scaffold(
           appBar: AppBar(title: const Text('Channels'), bottom: const TabBar(tabs: [Tab(text: 'Mine'), Tab(text: 'Public')])),
           floatingActionButton: FloatingActionButton.extended(
@@ -209,7 +211,7 @@ class _ChannelPageState extends State<ChannelPage> {
       if (it.e.id.isNotEmpty) items.add(it);
     }
     return ListView(padding: const EdgeInsets.only(bottom: 32), children: [
-      _header(name, desc, owner, posterId, items.length, mine),
+      _header(name, desc, owner, posterId, items.length, mine, (ch['visibility'] ?? 'public').toString()),
       if (mine)
         Padding(
           padding: const EdgeInsets.fromLTRB(12, 4, 12, 8),
@@ -226,7 +228,7 @@ class _ChannelPageState extends State<ChannelPage> {
     ]);
   }
 
-  Widget _header(String name, String desc, String owner, String? posterId, int count, bool mine) {
+  Widget _header(String name, String desc, String owner, String? posterId, int count, bool mine, String visibility) {
     return Container(
       margin: const EdgeInsets.fromLTRB(12, 12, 12, 4),
       padding: const EdgeInsets.all(14),
@@ -242,12 +244,22 @@ class _ChannelPageState extends State<ChannelPage> {
           Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
             Text(name, style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w800)),
             const SizedBox(height: 2),
-            Text('@$owner · $count videos', style: TextStyle(fontSize: 12.5, color: Colors.grey.shade600)),
+            Text('@$owner · $count videos${mine ? ' · ${visibility == 'private' ? 'Private 🔒' : 'Public 🌐'}' : ''}', style: TextStyle(fontSize: 12.5, color: Colors.grey.shade600)),
           ])),
           if (mine)
             PopupMenuButton<String>(
-              onSelected: (a) async { if (a == 'del') await _delete(); },
-              itemBuilder: (_) => const [PopupMenuItem(value: 'del', child: Text('Delete channel'))],
+              onSelected: (a) async {
+                if (a == 'del') {
+                  await _delete();
+                } else if (a == 'settings') {
+                  final changed = await Navigator.push<bool>(context, MaterialPageRoute(builder: (_) => ChannelSettingsPage(channel: Map<String, dynamic>.of(ch))));
+                  if (changed == true && mounted) setState(() => refresh = UniqueKey());
+                }
+              },
+              itemBuilder: (_) => const [
+                PopupMenuItem(value: 'settings', child: Text('Channel settings')),
+                PopupMenuItem(value: 'del', child: Text('Delete channel')),
+              ],
             ),
         ]),
         if (desc.isNotEmpty)
@@ -461,5 +473,126 @@ class _AddVideoSheetState extends State<AddVideoSheet> {
             ),
           ]),
         ),
+      );
+}
+
+/// Owner-only channel settings: rename, description, public/private
+/// visibility and delete (with confirmation).
+class ChannelSettingsPage extends StatefulWidget {
+  final Map<String, dynamic> channel;
+  const ChannelSettingsPage({super.key, required this.channel});
+  @override
+  State<ChannelSettingsPage> createState() => _ChannelSettingsPageState();
+}
+
+class _ChannelSettingsPageState extends State<ChannelSettingsPage> {
+  late final String cid = (widget.channel['id'] ?? '').toString();
+  late final TextEditingController name = TextEditingController(text: (widget.channel['name'] ?? '').toString());
+  late final TextEditingController desc = TextEditingController(text: (widget.channel['description'] ?? '').toString());
+  late String visibility = ((widget.channel['visibility'] ?? 'public').toString() == 'private') ? 'private' : 'public';
+  bool busy = false, deleting = false;
+
+  Future<void> save() async {
+    if (busy) return;
+    setState(() => busy = true);
+    try {
+      await PipsApi.channelPatch(cid, {
+        'name': name.text.trim(),
+        'description': desc.text.trim(),
+        'visibility': visibility,
+      });
+      if (mounted) {
+        toast(context, 'Channel settings saved');
+        Navigator.pop(context, true);
+      }
+    } on ApiException catch (e) {
+      if (mounted) toast(context, e.message);
+    }
+    if (mounted) setState(() => busy = false);
+  }
+
+  Future<void> confirmDelete() async {
+    final nameOf = (widget.channel['name'] ?? 'channel').toString();
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text('Delete "$nameOf"?'),
+        content: const Text('The channel and its video list will be removed for everyone. Your uploaded video files stay in your cloud. This cannot be undone.'),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
+          FilledButton(
+            style: FilledButton.styleFrom(backgroundColor: AppTheme.red),
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Delete channel'),
+          ),
+        ],
+      ),
+    );
+    if (ok != true) return;
+    setState(() => deleting = true);
+    try {
+      await PipsApi.channelDelete(cid);
+      if (mounted) {
+        toast(context, 'Channel deleted');
+        Navigator.pop(context, true);
+      }
+    } on ApiException catch (e) {
+      if (mounted) toast(context, e.message);
+      if (mounted) setState(() => deleting = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) => Scaffold(
+        appBar: AppBar(title: const Text('Channel settings')),
+        body: ListView(padding: const EdgeInsets.all(20), children: [
+          TextField(controller: name, decoration: const InputDecoration(labelText: 'Channel name', border: OutlineInputBorder())),
+          const SizedBox(height: 12),
+          TextField(controller: desc, maxLines: 3, decoration: const InputDecoration(labelText: 'Description', border: OutlineInputBorder())),
+          const SizedBox(height: 16),
+          Container(
+            decoration: BoxDecoration(
+              color: Theme.of(context).cardColor,
+              borderRadius: BorderRadius.circular(14),
+              border: Border.all(color: Theme.of(context).dividerColor),
+            ),
+            child: Column(children: [
+              SwitchListTile(
+                value: visibility == 'public',
+                onChanged: (v) => setState(() => visibility = v ? 'public' : 'private'),
+                activeColor: AppTheme.blue,
+                title: Text(visibility == 'public' ? 'Public 🌐' : 'Private 🔒', style: const TextStyle(fontWeight: FontWeight.w700)),
+                subtitle: Text(
+                  visibility == 'public'
+                      ? 'Anyone can discover this channel; videos appear in the home feed, search and the web share player.'
+                      : 'Hidden from discovery — only you see it, and web share playback is disabled.',
+                  style: const TextStyle(fontSize: 12),
+                ),
+              ),
+            ]),
+          ),
+          const SizedBox(height: 20),
+          SizedBox(
+            width: double.infinity,
+            child: FilledButton(
+              onPressed: busy ? null : save,
+              style: FilledButton.styleFrom(padding: const EdgeInsets.symmetric(vertical: 13)),
+              child: Text(busy ? 'Saving…' : 'Save settings'),
+            ),
+          ),
+          const SizedBox(height: 28),
+          const Divider(),
+          const SizedBox(height: 8),
+          Center(
+            child: OutlinedButton.icon(
+              style: OutlinedButton.styleFrom(foregroundColor: AppTheme.red, side: const BorderSide(color: AppTheme.red), padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 12)),
+              onPressed: deleting ? null : confirmDelete,
+              icon: const Icon(Icons.delete_forever_rounded, size: 20),
+              label: Text(deleting ? 'Deleting…' : 'Delete channel'),
+            ),
+          ),
+          const SizedBox(height: 6),
+          Center(child: Text('Deleting removes the channel for everyone — video files stay in your cloud.', textAlign: TextAlign.center, style: TextStyle(fontSize: 11.5, color: Colors.grey.shade600))),
+        ]),
       );
 }

@@ -3,6 +3,8 @@ import '../api.dart';
 import '../models.dart';
 import '../widgets.dart';
 import 'files.dart';
+import 'channels.dart';
+import 'yt_player.dart';
 
 class TrashPage extends StatefulWidget {
   const TrashPage({super.key});
@@ -65,26 +67,80 @@ class _SearchPageState extends State<SearchPage> {
   Widget build(BuildContext context) => Scaffold(
         appBar: AppBar(title: TextField(
           autofocus: true,
-          decoration: const InputDecoration(hintText: 'Search everything…', border: InputBorder.none),
+          decoration: const InputDecoration(hintText: 'Search videos, channels & files…', border: InputBorder.none),
           onChanged: (v) => setState(() => q = v),
         )),
-        body: q.isEmpty ? const EmptyState(icon: '🔍', text: 'Type to search your files and channels.') : FutureBuilder<Map<String, dynamic>>(
-          future: PipsApi.search(q),
+        body: q.trim().length < 2 ? const EmptyState(icon: '🔍', text: 'Type to search your files, videos and channels.') : FutureBuilder<List<dynamic>>(
+          future: Future.wait<dynamic>([PipsApi.search(q), PipsApi.channelsGlobalFileSearch(q), PipsApi.channelsPublic(q)]),
           builder: (_, s) {
             if (s.connectionState != ConnectionState.done) return const Loading();
-            final r = s.data ?? {};
-            final files = ((r['files'] ?? r['results'] ?? const []) as List).map((e) => Entry(Map<String, dynamic>.from(e as Map))).toList();
-            return ListView(children: [
-              if (files.isEmpty && (r['channels'] as List?)?.isNotEmpty != true) const EmptyState(icon: '🔍', text: 'Nothing found.'),
-              ...files.map((e) => fileTile(context, e, () {}, gallery: files)),
-              if ((r['channels'] as List?)?.isNotEmpty == true) ...[
+            final r0 = (s.data?[0] as Map<String, dynamic>?) ?? <String, dynamic>{};
+            final files = ((r0['files'] ?? r0['results'] ?? const []) as List).map((e) => Entry(Map<String, dynamic>.from(e as Map))).toList();
+            final vids = <ChanItem>[
+              for (final x in ((s.data?[1] as List<dynamic>?) ?? const []))
+                ChanItem.fromRaw(Map<String, dynamic>.from(x as Map)),
+            ]..removeWhere((x) => x.e.id.isEmpty);
+            final chans = [
+              for (final c in ((s.data?[2] as List<dynamic>?) ?? const []))
+                Map<String, dynamic>.from(c as Map),
+            ];
+            if (files.isEmpty && vids.isEmpty && chans.isEmpty) return const EmptyState(icon: '🔍', text: 'Nothing found.');
+            return ListView(padding: const EdgeInsets.only(bottom: 24), children: [
+              if (vids.isNotEmpty) ...[
+                const SectionTitle('Videos'),
+                for (final it in vids) _videoRow(it, vids),
+              ],
+              if (chans.isNotEmpty) ...[
                 const SectionTitle('Channels'),
-                ...(r['channels'] as List).map((c) { final m = Map<String, dynamic>.from(c as Map); return ListTile(leading: const Icon(Icons.tv), title: Text((m['name'] ?? '').toString())); }),
+                for (final c in chans) _channelRow(c),
+              ],
+              if (files.isNotEmpty) ...[
+                const SectionTitle('My files'),
+                ...files.map((e) => fileTile(context, e, () {}, gallery: files)),
               ],
             ]);
           },
         ),
       );
+
+  Widget _videoRow(ChanItem it, List<ChanItem> vids) => ListTile(
+        leading: Container(
+          width: 96, height: 54,
+          decoration: BoxDecoration(color: const Color(0xFF16181D), borderRadius: BorderRadius.circular(8)),
+          child: const Icon(Icons.play_arrow_rounded, color: Colors.white70, size: 30),
+        ),
+        title: Text(it.title, maxLines: 2, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 13.5, fontWeight: FontWeight.w600)),
+        subtitle: Row(children: [
+          ChannelAvatar(fileId: it.channelLogoId, name: it.channelName, radius: 8),
+          const SizedBox(width: 5),
+          Flexible(child: Text(it.channelName.isEmpty ? '@${it.channelOwner}' : it.channelName, maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 11))),
+        ]),
+        onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => ChannelVideoPage(
+          video: it.e,
+          videoTitle: it.title,
+          channelId: it.channelId,
+          channelName: it.channelName,
+          channelOwner: it.channelOwner,
+          channelLogoId: it.channelLogoId,
+          related: vids,
+        ))),
+      );
+
+  Widget _channelRow(Map<String, dynamic> c) {
+    final name = (c['name'] ?? 'channel').toString();
+    final id = (c['id'] ?? '').toString();
+    final desc = (c['description'] ?? '').toString();
+    final count = c['file_count'] is num ? (c['file_count'] as num).toInt() : 0;
+    final poster = c['poster'];
+    final posterId = poster is Map ? (poster['id'] ?? '').toString() : '';
+    return ListTile(
+      leading: ChannelAvatar(fileId: posterId.isEmpty ? null : posterId, name: name, radius: 22),
+      title: Text(name, style: const TextStyle(fontWeight: FontWeight.w600)),
+      subtitle: Text(desc.isEmpty ? '$count videos' : '$desc · $count videos', maxLines: 1, overflow: TextOverflow.ellipsis),
+      trailing: const Icon(Icons.chevron_right, color: Colors.grey),
+      onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => ChannelPage(id: id, name: name))),
+    );
+  }
 }
 
 class NotificationsPage extends StatefulWidget {

@@ -1,8 +1,10 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:share_plus/share_plus.dart';
 import 'package:video_player/video_player.dart';
 import '../api.dart';
+import '../mini_player.dart';
 import '../models.dart';
 import '../widgets.dart';
 
@@ -13,21 +15,37 @@ String _fmtDur(Duration d) {
 
 String _speedLabel(double x) => x.toString().endsWith('.0') ? '${x.toStringAsFixed(0)}×' : '$x×';
 
-/// One playable item inside a channel (file + display title).
+/// One playable item inside a channel (file + display title). Items coming
+/// from the public feed or global search also carry their own channel info.
 class ChanItem {
   final Entry e;
   final String title;
   final String addedAt;
-  ChanItem({required this.e, required this.title, this.addedAt = ''});
+  final String channelId, channelName, channelOwner;
+  final String? channelLogoId;
+  ChanItem({
+    required this.e,
+    required this.title,
+    this.addedAt = '',
+    this.channelId = '',
+    this.channelName = '',
+    this.channelOwner = '',
+    this.channelLogoId,
+  });
 
   factory ChanItem.fromRaw(Map<String, dynamic> f) {
     final media = f['media'] is Map ? Map<String, dynamic>.from(f['media'] as Map) : <String, dynamic>{};
     final e = Entry(media);
     final t = (f['title'] ?? '').toString();
+    final logo = (f['channel_poster_id'] ?? '').toString();
     return ChanItem(
       e: e,
       title: t.isEmpty ? e.name : t,
       addedAt: (f['added_at'] ?? '').toString(),
+      channelId: (f['channel_id'] ?? '').toString(),
+      channelName: (f['channel_name'] ?? '').toString(),
+      channelOwner: (f['owner'] ?? '').toString(),
+      channelLogoId: logo.isEmpty ? null : logo,
     );
   }
 }
@@ -39,14 +57,16 @@ enum _DragMode { none, seek, scroll }
 /// Portrait: the player is pinned on top (16:9), below it the title, the
 /// channel row (logo + name) and the "Up next" related list. Swiping UP on
 /// the video scrolls the panel down to reveal related videos (YouTube
-/// behaviour); auto-plays the next related video when one ends. Fullscreen
-/// rotates to landscape and hides the panel.
+/// behaviour); swiping DOWN at the very top closes the page back to home.
+/// Leaving the page while playing hands the video to the floating mini
+/// player. Fullscreen rotates to landscape and hides the panel.
 class ChannelVideoPage extends StatefulWidget {
   final Entry video;
   final String videoTitle;
   final String channelId, channelName, channelOwner;
   final String? channelLogoId;
   final List<ChanItem> related;
+  final Duration startAt;
   const ChannelVideoPage({
     super.key,
     required this.video,
@@ -56,6 +76,7 @@ class ChannelVideoPage extends StatefulWidget {
     required this.channelOwner,
     this.channelLogoId,
     required this.related,
+    this.startAt = Duration.zero,
   });
   @override
   State<ChannelVideoPage> createState() => _ChannelVideoPageState();
@@ -66,6 +87,10 @@ class _ChannelVideoPageState extends State<ChannelVideoPage> {
   late Entry cur = widget.video;
   late String curTitle = widget.videoTitle;
   late List<ChanItem> queue = List.of(widget.related);
+  late String curChannelId = widget.channelId;
+  late String curChannelName = widget.channelName;
+  late String curChannelOwner = widget.channelOwner;
+  String? curChannelLogoId = widget.channelLogoId;
   String? err;
   bool controls = true;
   bool muted = false;
@@ -74,6 +99,9 @@ class _ChannelVideoPageState extends State<ChannelVideoPage> {
   double? scrub;
   Timer? hide;
   bool loading = false;
+  bool handedToMini = false;
+  double dismissPx = 0;
+  bool seeked = false;
 
   _DragMode mode = _DragMode.none;
   double dragFrom = 0;
@@ -85,6 +113,7 @@ class _ChannelVideoPageState extends State<ChannelVideoPage> {
   @override
   void initState() {
     super.initState();
+    MiniPlayer.i.stop(); // opening the full page always closes the mini window
     _load(cur, title: curTitle);
   }
 
@@ -92,8 +121,26 @@ class _ChannelVideoPageState extends State<ChannelVideoPage> {
   void dispose() {
     hide?.cancel();
     _applySystemUi(false);
-    c?.removeListener(_tick);
-    c?.dispose();
+    final cc = c;
+    final alive = cc != null && cc.value.isInitialized && err == null;
+    if (alive && !handedToMini) {
+      // Hand the playing video to the floating mini player — it keeps going.
+      MiniPlayer.i.attach(
+        controller: cc,
+        e: cur,
+        videoTitle: curTitle,
+        channelId: curChannelId,
+        channelName: curChannelName,
+        channelOwner: curChannelOwner,
+        channelLogoId: curChannelLogoId,
+        queue: queue,
+      );
+      cc.removeListener(_tick);
+    } else if (!handedToMini) {
+      c?.removeListener(_tick);
+      c?.dispose();
+    }
+    c = null;
     listCtrl.dispose();
     super.dispose();
   }
@@ -118,7 +165,7 @@ class _ChannelVideoPageState extends State<ChannelVideoPage> {
 
   int get _curIdx => queue.indexWhere((x) => x.e.id == cur.id);
 
-  Future<void> _load(Entry e, {String? title, bool autoplay = true}) async {
+  Future<void> _load(Entry e, {String? title, bool autoplay = true, ChanItem? item}) async {
     if (loading) return;
     loading = true;
     final old = c;
@@ -132,9 +179,18 @@ class _ChannelVideoPageState extends State<ChannelVideoPage> {
         c = nc;
         cur = e;
         if (title != null) curTitle = title;
+        if (item != null) {
+          if (item.channelName.isNotEmpty) {
+            curChannelId = item.channelId;
+            curChannelName = item.channelName;
+            curChannelOwner = item.channelOwner;
+            curChannelLogoId = item.channelLogoId;
+          }
+        }
         err = null;
         scrub = null;
         controls = true;
+        seeked = false;
       });
     }
     _poke();
@@ -143,6 +199,12 @@ class _ChannelVideoPageState extends State<ChannelVideoPage> {
       if (mounted) {
         nc.setVolume(muted ? 0 : 1);
         nc.setPlaybackSpeed(speed);
+        if (!seeked && widget.startAt > Duration.zero && e.id == widget.video.id) {
+          seeked = true;
+          try {
+            await nc.seekTo(widget.startAt);
+          } catch (_) {}
+        }
         if (autoplay) unawaited(nc.play());
         setState(() {});
       } else {
@@ -314,7 +376,29 @@ class _ChannelVideoPageState extends State<ChannelVideoPage> {
       ),
       Padding(
         padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
-        child: Text('${fmtBytes(cur.size)} · @${widget.channelOwner}', style: TextStyle(fontSize: 12.5, color: Colors.grey.shade600)),
+        child: Text('${fmtBytes(cur.size)} · @${curChannelOwner.isNotEmpty ? curChannelOwner : widget.channelOwner}', style: TextStyle(fontSize: 12.5, color: Colors.grey.shade600)),
+      ),
+      // YouTube-style action chips
+      Padding(
+        padding: const EdgeInsets.fromLTRB(12, 0, 12, 6),
+        child: Row(children: [
+          ActionChip(
+            avatar: const Icon(Icons.share_outlined, size: 17, color: AppTheme.blue),
+            label: const Text('Share', style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.w700)),
+            visualDensity: VisualDensity.compact,
+            onPressed: _shareLink,
+          ),
+          const SizedBox(width: 8),
+          ActionChip(
+            avatar: const Icon(Icons.copy_rounded, size: 16, color: AppTheme.teal),
+            label: const Text('Copy link', style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.w700)),
+            visualDensity: VisualDensity.compact,
+            onPressed: () {
+              Clipboard.setData(ClipboardData(text: '${PipsApi.base}/v/${cur.id}'));
+              toast(context, 'Video link copied');
+            },
+          ),
+        ]),
       ),
       Container(
         margin: const EdgeInsets.fromLTRB(12, 4, 12, 6),
@@ -325,12 +409,12 @@ class _ChannelVideoPageState extends State<ChannelVideoPage> {
           border: Border.all(color: Theme.of(context).dividerColor),
         ),
         child: Row(children: [
-          ChannelAvatar(fileId: widget.channelLogoId, name: widget.channelName, radius: 18),
+          ChannelAvatar(fileId: curChannelLogoId, name: curChannelName, radius: 18),
           const SizedBox(width: 10),
           Expanded(
             child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-              Text(widget.channelName, maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 14)),
-              Text('@${widget.channelOwner}', maxLines: 1, overflow: TextOverflow.ellipsis, style: TextStyle(fontSize: 11.5, color: Colors.grey.shade600)),
+              Text(curChannelName, maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 14)),
+              Text('@${curChannelOwner}', maxLines: 1, overflow: TextOverflow.ellipsis, style: TextStyle(fontSize: 11.5, color: Colors.grey.shade600)),
             ]),
           ),
           Icon(Icons.subscriptions_outlined, size: 18, color: Colors.grey.shade500),
@@ -352,10 +436,28 @@ class _ChannelVideoPageState extends State<ChannelVideoPage> {
             child: const Icon(Icons.play_arrow_rounded, color: Colors.white70, size: 30),
           ),
           title: Text(it.title, maxLines: 2, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 13.5, fontWeight: FontWeight.w600)),
-          subtitle: Text(fmtBytes(it.e.size), style: const TextStyle(fontSize: 11)),
-          onTap: () => _load(it.e, title: it.title),
+          subtitle: Row(children: [
+            if (it.channelName.isNotEmpty && it.channelName != curChannelName) ...[
+              ChannelAvatar(fileId: it.channelLogoId, name: it.channelName, radius: 8),
+              const SizedBox(width: 5),
+              Flexible(child: Text(it.channelName, maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 11)))]
+            else
+              Text(fmtBytes(it.e.size), style: const TextStyle(fontSize: 11)),
+          ]),
+          onTap: () => _load(it.e, title: it.title, item: it),
         ),
     ];
+  }
+
+  /// Share the secure web player link — opens in any browser as an embed
+  /// player; the raw file URL never leaks (short-lived signed stream).
+  Future<void> _shareLink() async {
+    try {
+      await Share.share('${PipsApi.base}/v/${cur.id}', subject: curTitle);
+    } catch (_) {
+      Clipboard.setData(ClipboardData(text: '${PipsApi.base}/v/${cur.id}'));
+      if (mounted) toast(context, 'Link copied');
+    }
   }
 
   Widget _errBox() => Center(
@@ -439,6 +541,7 @@ class _ChannelVideoPageState extends State<ChannelVideoPage> {
                 ),
                 IconButton(tooltip: '+10s', icon: const Icon(Icons.forward_10), color: Colors.white, onPressed: () { _poke(); unawaited(_skip(10)); }),
                 IconButton(tooltip: 'Mute', icon: Icon(muted ? Icons.volume_off : Icons.volume_up), color: Colors.white, onPressed: _toggleMute),
+                IconButton(tooltip: 'Share', icon: const Icon(Icons.share_outlined), color: Colors.white, onPressed: _shareLink),
                 IconButton(tooltip: 'Fullscreen', icon: const Icon(Icons.fullscreen), color: Colors.white, onPressed: () => _setFs(true)),
               ]),
             ),
@@ -497,12 +600,19 @@ class _ChannelVideoPageState extends State<ChannelVideoPage> {
         _poke();
       },
       // Swipe up/down on the video → scroll the panel to reveal related videos.
+      // At the very top, dragging DOWN closes the page (back to home).
       onVerticalDragStart: (d) {
         mode = _DragMode.scroll;
+        dismissPx = 0;
       },
       onVerticalDragUpdate: (d) {
         if (mode != _DragMode.scroll || fs) return;
         if (!listCtrl.hasClients) return;
+        if (d.delta.dy > 0 && listCtrl.offset <= 0.5) {
+          dismissPx += d.delta.dy;
+          if (dismissPx > 40 && bubble != 'Release to close ▼') setState(() => bubble = 'Release to close ▼');
+          return;
+        }
         final max = listCtrl.position.maxScrollExtent;
         final target = (listCtrl.offset - d.delta.dy).clamp(0.0, max);
         if (target != listCtrl.offset) listCtrl.jumpTo(target);
@@ -515,10 +625,20 @@ class _ChannelVideoPageState extends State<ChannelVideoPage> {
       onVerticalDragEnd: (d) {
         if (mode != _DragMode.scroll) return;
         mode = _DragMode.none;
-        if (bubble == 'Related videos') {
+        if (dismissPx > 90) {
+          setState(() {
+            bubble = null;
+            dismissPx = 0;
+          });
+          Navigator.pop(context);
+          return;
+        }
+        dismissPx = 0;
+        if (bubble == 'Related videos' || bubble == 'Release to close ▼') {
           Timer(const Duration(milliseconds: 450), () {
             if (mounted && bubble == 'Related videos') setState(() => bubble = null);
           });
+          if (mounted && bubble == 'Release to close ▼') setState(() => bubble = null);
         }
       },
       child: child,

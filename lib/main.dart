@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'api.dart';
 import 'firebase_options.dart';
+import 'mini_player.dart';
 import 'services/notifications.dart';
 import 'widgets.dart';
 import 'screens/auth.dart';
@@ -44,6 +45,7 @@ class PipsApp extends StatelessWidget {
           theme: ThemeData(useMaterial3: true, colorScheme: ColorScheme.fromSeed(seedColor: AppTheme.blue)),
           darkTheme: ThemeData(useMaterial3: true, colorScheme: ColorScheme.fromSeed(seedColor: AppTheme.blue, brightness: Brightness.dark)),
           themeMode: mode,
+          navigatorKey: navKey,
           home: ValueListenableBuilder<bool>(
             valueListenable: onboardingDone,
             builder: (_, ob, ___) => !ob

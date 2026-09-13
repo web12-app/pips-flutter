@@ -50,7 +50,7 @@ class PipsApi {
 
   static Map<String, String> get _headers => {
         if (session != null && session!.isNotEmpty) 'Cookie': 'pips_session=$session',
-        'User-Agent': 'PipsApp/3.10 (Flutter)',
+        'User-Agent': 'PipsApp/3.11 (Flutter)',
       };
 
   static Map<String, String> get authHeaders => _headers;
@@ -293,6 +293,11 @@ class PipsApi {
   static Future<List<dynamic>> channelsGlobalFileSearch(String q) async {
     final r = await _req('GET', '$api/channels/search_files?q=${enc(q)}');
     return r['files'] is List ? r['files'] : [];
+  }
+  /// YouTube-style home feed: newest videos across all public channels.
+  static Future<List<dynamic>> channelFeed([String q = '']) async {
+    final r = await _req('GET', '$api/channels/feed?q=${enc(q)}');
+    return r['videos'] is List ? r['videos'] : [];
   }
 
   // ---------------------------------------------------------------- uploads
