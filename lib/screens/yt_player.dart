@@ -398,6 +398,13 @@ class _ChannelVideoPageState extends State<ChannelVideoPage> {
               toast(context, 'Video link copied');
             },
           ),
+          const SizedBox(width: 8),
+          ActionChip(
+            avatar: const Icon(Icons.widgets_outlined, size: 16, color: AppTheme.blue),
+            label: const Text('Embed', style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.w700)),
+            visualDensity: VisualDensity.compact,
+            onPressed: _embedLink,
+          ),
         ]),
       ),
       Container(
@@ -457,6 +464,23 @@ class _ChannelVideoPageState extends State<ChannelVideoPage> {
     } catch (_) {
       Clipboard.setData(ClipboardData(text: '${PipsApi.base}/v/${cur.id}'));
       if (mounted) toast(context, 'Link copied');
+    }
+  }
+
+  /// Share the YouTube-style embeddable player link:
+  /// https://pips-next.vercel.app/embedding/<file_id>
+  /// — paste the link into any browser (loads a URL preview in an
+  /// iframe-ready page) or the <iframe> code into any page/WebView.
+  /// Secure play: public, short-lived signed stream, no download.
+  Future<void> _embedLink() async {
+    final url = '${PipsApi.base}/embedding/${cur.id}';
+    final code = '<iframe src="$url" width="100%" height="580" style="border:0" '
+        'allow="autoplay; fullscreen; picture-in-picture" allowfullscreen loading="lazy"></iframe>';
+    try {
+      await Share.share('$url\n\nEmbed code:\n$code', subject: 'Embed — $curTitle');
+    } catch (_) {
+      Clipboard.setData(ClipboardData(text: url));
+      if (mounted) toast(context, 'Embed link copied');
     }
   }
 
