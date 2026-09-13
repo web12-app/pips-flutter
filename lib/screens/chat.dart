@@ -291,7 +291,7 @@ class _ChatPageState extends State<ChatPage> {
   }
 
   Future<void> attach({bool imageOnly = false}) async {
-    final r = await FilePicker.platform.pickFiles(type: imageOnly ? FileType.image : null);
+    final r = await FilePicker.platform.pickFiles(type: imageOnly ? FileType.image : FileType.any);
     final f = r?.files.first;
     if (f == null || f.path == null) return;
     setState(() => sending = true);
