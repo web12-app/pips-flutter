@@ -325,6 +325,7 @@ class _OverviewPageState extends State<OverviewPage> {
             _tab(context, Icons.add_circle_rounded, 'Upload', primary: true, onTap: () => showSheet(context, const UploadSheet())),
             _tab(context, Icons.tv_rounded, 'Channels', onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const ChannelsPage()))),
             _tab(context, Icons.folder_rounded, 'Folders', onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const FoldersPage()))),
+            _tab(context, Icons.explore_rounded, 'Explorer', onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const CloudExplorerPage()))),
             _tab(context, Icons.delete_rounded, 'Trash', onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const TrashPage()))),
             _tab(context, Icons.history_rounded, 'History', onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const HistoryPage()))),
             _tab(context, Icons.table_chart_rounded, 'Pips DB', onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const DbPage()))),

@@ -50,6 +50,7 @@ class _FilesPageState extends State<FilesPage> {
               )),
           ])),
           SizedBox(height: 52, child: ListView(scrollDirection: Axis.horizontal, padding: const EdgeInsets.symmetric(horizontal: 12), children: [
+            Padding(padding: const EdgeInsets.symmetric(horizontal: 4), child: _pill('Explorer', Icons.explore_rounded, const Color(0xFF7C3AED), const Color(0xFFEDE9FE), () => Navigator.push(context, MaterialPageRoute(builder: (_) => const CloudExplorerPage())))),
             Padding(padding: const EdgeInsets.symmetric(horizontal: 4), child: _pill('Upload', Icons.upload_file, const Color(0xFF2563EB), const Color(0xFFDBEAFE), () => showSheet(context, const UploadSheet()))),
             Padding(padding: const EdgeInsets.symmetric(horizontal: 4), child: _pill('Folder', Icons.create_new_folder_outlined, const Color(0xFF059669), const Color(0xFFD1FAE5), () => Navigator.push(context, MaterialPageRoute(builder: (_) => const FoldersPage())))),
             Padding(padding: const EdgeInsets.symmetric(horizontal: 4), child: _pill('Scan', Icons.document_scanner_outlined, const Color(0xFF0D9488), const Color(0xFFCCFBF1), _scan)),
@@ -356,6 +357,7 @@ class _FoldersPageState extends State<FoldersPage> {
   @override
   Widget build(BuildContext context) => Scaffold(
         appBar: AppBar(title: const Text('Folders'), actions: [
+          IconButton(icon: const Icon(Icons.explore_outlined), tooltip: 'Open in Explorer', onPressed: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const CloudExplorerPage()))),
           IconButton(icon: const Icon(Icons.create_new_folder_outlined), onPressed: () async {
             final c = TextEditingController();
             final name = await showDialog<String>(context: context, builder: (ctx) => AlertDialog(title: const Text('New folder'), content: TextField(controller: c, decoration: const InputDecoration(hintText: 'Folder name')), actions: [TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')), FilledButton(onPressed: () => Navigator.pop(ctx, c.text.trim()), child: const Text('Create'))]));
@@ -425,4 +427,228 @@ class _FolderPageState extends State<FolderPage> {
           },
         ),
       );
+}
+
+// ================================================================
+// Cloud Explorer — Prism-style folder navigation over the Pips cloud.
+// Folders first, then ALL files in the current folder (every type
+// allowed). Breadcrumbs, rename/delete folders, upload into a folder.
+// ================================================================
+class CloudExplorerPage extends StatefulWidget {
+  final String initialPath;
+  const CloudExplorerPage({super.key, this.initialPath = ''});
+  @override
+  State<CloudExplorerPage> createState() => _CloudExplorerPageState();
+}
+
+class _CloudExplorerPageState extends State<CloudExplorerPage> {
+  late String path = widget.initialPath;
+  Key refresh = UniqueKey();
+
+  void reload() => setState(() => refresh = UniqueKey());
+  void go(String p) => setState(() { path = p; refresh = UniqueKey(); });
+
+  List<String> get _segments => path.isEmpty ? const <String>[] : path.split('/');
+  String _label(String p) => p.isEmpty ? 'Pips Cloud' : p.split('/').last;
+
+  Future<void> _newFolder() async {
+    final c = TextEditingController();
+    final name = await showDialog<String>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text(path.isEmpty ? 'New folder' : 'New folder in “${_label(path)}”'),
+        content: TextField(controller: c, autofocus: true, decoration: const InputDecoration(hintText: 'Folder name')),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
+          FilledButton(onPressed: () => Navigator.pop(ctx, c.text.trim()), child: const Text('Create')),
+        ],
+      ),
+    );
+    if (name == null || name.isEmpty) return;
+    try {
+      await PipsApi.createFolder(path.isEmpty ? name : '$path/$name');
+      reload();
+    } on ApiException catch (ex) {
+      if (mounted) toast(context, ex.message);
+    }
+  }
+
+  Future<void> _folderMenu(BuildContext context, Map<String, dynamic> f) async {
+    final id = (f['id'] ?? '').toString();
+    final fp = (f['path'] ?? f['name'] ?? '').toString();
+    final name = fp.split('/').last;
+    try {
+      if (id.isEmpty) return;
+      if (_lastMenuAction == 'ren') {
+        final c = TextEditingController(text: name);
+        final n = await showDialog<String>(context: context, builder: (ctx) => AlertDialog(
+              title: const Text('Rename folder'),
+              content: TextField(controller: c),
+              actions: [
+                TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
+                FilledButton(onPressed: () => Navigator.pop(ctx, c.text.trim()), child: const Text('Save')),
+              ],
+            ));
+        if (n != null && n.isNotEmpty) {
+          await PipsApi.renameFolder(id, n);
+          reload();
+        }
+      } else if (_lastMenuAction == 'del') {
+        await PipsApi.deleteFolder(id);
+        reload();
+      }
+    } on ApiException catch (ex) {
+      if (mounted) toast(context, ex.message);
+    }
+  }
+
+  String? _lastMenuAction;
+
+  @override
+  Widget build(BuildContext context) {
+    final hc = HomeColors.of(context);
+    return Scaffold(
+      appBar: AppBar(
+        title: Row(children: [
+          if (path.isEmpty) const Icon(Icons.cloud_rounded, size: 20, color: AppTheme.blue),
+          if (path.isEmpty) const SizedBox(width: 7),
+          Expanded(child: Text(_label(path), maxLines: 1, overflow: TextOverflow.ellipsis)),
+        ]),
+        actions: [
+          IconButton(icon: const Icon(Icons.create_new_folder_outlined), tooltip: 'New folder', onPressed: _newFolder),
+        ],
+      ),
+      floatingActionButton: FloatingActionButton.extended(
+        onPressed: () => showSheet(context, UploadSheet(presetFolder: path)),
+        icon: const Icon(Icons.upload),
+        label: Text(path.isEmpty ? 'Upload' : 'Upload here'),
+      ),
+      body: Column(children: [
+        if (_segments.isNotEmpty) _breadcrumb(hc),
+        Expanded(
+          child: FutureBuilder<List<dynamic>>(
+            key: refresh,
+            future: Future.wait<dynamic>([PipsApi.folders(), PipsApi.filesTree(path)]),
+            builder: (_, s) {
+              if (s.connectionState != ConnectionState.done) return const Loading();
+              final folders = (s.data?[0] as List<dynamic>?) ?? const <dynamic>[];
+              final resp = (s.data?[1] as Map<String, dynamic>?) ?? const <String, dynamic>{};
+              final tree = (resp['tree'] is Map ? resp['tree'] : const {}) as Map;
+              List<dynamic> entriesFor(String p) {
+                final v = p.isEmpty ? (tree[''] ?? tree['root']) : tree[p];
+                return v is List ? v : const <dynamic>[];
+              }
+
+              // Direct sub-folders of the current path
+              final subs = <Map<String, dynamic>>[];
+              for (final f in folders) {
+                final m = Map<String, dynamic>.from(f as Map);
+                final fp = (m['path'] ?? m['name'] ?? '').toString();
+                if (fp.isEmpty) continue;
+                final direct = path.isEmpty
+                    ? fp.split('/').length == 1
+                    : fp.startsWith('$path/') && !fp.substring(path.length + 1).contains('/');
+                if (direct) subs.add(m);
+              }
+              subs.sort((a, b) =>
+                  ((a['path'] ?? a['name'] ?? '') as String).toLowerCase().compareTo(((b['path'] ?? b['name'] ?? '') as String).toLowerCase()));
+
+              // ALL files inside the current folder — every type allowed
+              final files = entriesFor(path)
+                  .map((e) => Entry(Map<String, dynamic>.from(e as Map)))
+                  .where((e) => e.folder == path)
+                  .toList();
+
+              if (subs.isEmpty && files.isEmpty) {
+                return EmptyState(
+                  icon: '📂',
+                  text: path.isEmpty
+                      ? 'Your cloud is empty — upload your first file.'
+                      : 'This folder is empty. Tap “Upload here” to add files.',
+                );
+              }
+
+              return ListView(
+                padding: const EdgeInsets.symmetric(vertical: 4, horizontal: 4),
+                children: [
+                  if (subs.isNotEmpty)
+                    Padding(
+                      padding: const EdgeInsets.fromLTRB(12, 8, 12, 2),
+                      child: Text('Folders · ${subs.length}', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w800, color: hc.text2)),
+                    ),
+                  for (final f in subs)
+                    _folderTile(hc, f, entriesFor((f['path'] ?? f['name'] ?? '').toString())),
+                  if (files.isNotEmpty)
+                    Padding(
+                      padding: const EdgeInsets.fromLTRB(12, 14, 12, 2),
+                      child: Text(path.isEmpty ? 'Files · ${files.length}' : 'Files in “${_label(path)}” · ${files.length}',
+                          style: TextStyle(fontSize: 12, fontWeight: FontWeight.w800, color: hc.text2)),
+                    ),
+                  for (final e in files) fileTile(context, e, reload, gallery: files),
+                ],
+              );
+            },
+          ),
+        ),
+      ]),
+    );
+  }
+
+  // ------------------------------------------------------------ breadcrumb
+  Widget _breadcrumb(HomeColors hc) => Container(
+        margin: const EdgeInsets.fromLTRB(16, 2, 16, 10),
+        padding: const EdgeInsets.symmetric(vertical: 7),
+        decoration: BoxDecoration(color: hc.surfaceSoft, borderRadius: BorderRadius.circular(12)),
+        child: SingleChildScrollView(
+          scrollDirection: Axis.horizontal,
+          child: Row(children: [
+            _crumb(hc, 'Pips Cloud', Icons.home_rounded, ''),
+            for (var i = 0; i < _segments.length; i++) ...[
+              const Icon(Icons.chevron_right_rounded, size: 14, color: Colors.grey),
+              _crumb(hc, _segments[i], Icons.folder_rounded, _segments.sublist(0, i + 1).join('/')),
+            ],
+          ]),
+        ),
+      );
+
+  Widget _crumb(HomeColors hc, String label, IconData icon, String target) => GestureDetector(
+        onTap: () => go(target),
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+          decoration: BoxDecoration(
+            color: target == path ? AppTheme.blueSoft : Colors.transparent,
+            borderRadius: BorderRadius.circular(8),
+          ),
+          child: Row(mainAxisSize: MainAxisSize.min, children: [
+            Icon(icon, size: 13.5, color: target == path ? AppTheme.blue : hc.text2),
+            const SizedBox(width: 4),
+            Text(label, style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.w700, color: target == path ? AppTheme.blue : hc.text2)),
+          ]),
+        ),
+      );
+
+  // ------------------------------------------------------------ folder row
+  Widget _folderTile(HomeColors hc, Map<String, dynamic> f, List<dynamic> filesIn) {
+    final fp = (f['path'] ?? f['name'] ?? '').toString();
+    final name = fp.split('/').last;
+    final id = (f['id'] ?? '').toString();
+    final n = filesIn.length;
+    return ListTile(
+      leading: const IconTile(icon: Icons.folder_rounded, bg: Color(0xFFFEF3C7), fg: Color(0xFFD97706)),
+      title: Text(name, maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 14)),
+      subtitle: Text('$n file${n == 1 ? '' : 's'}', style: const TextStyle(fontSize: 12)),
+      trailing: PopupMenuButton<String>(
+        tooltip: 'Folder options',
+        onSelected: (a) {
+          _lastMenuAction = a;
+          _folderMenu(context, f);
+        },
+        itemBuilder: (_) => const [
+          PopupMenuItem(value: 'ren', child: Text('Rename')),
+          PopupMenuItem(value: 'del', child: Text('Delete')),
+        ],
+      ),
+      onTap: () => go(fp),
+    );
+  }
 }
