@@ -5,12 +5,37 @@ import '../api.dart';
 import '../main.dart';
 import '../models.dart';
 import '../widgets.dart';
+import 'auth.dart';
 import 'misc.dart';
 import 'subscription.dart';
 
 /// Account — profile, plan card, camera uploads, desktop link, recovery & settings.
 class ProfilePage extends StatelessWidget {
   const ProfilePage({super.key});
+
+  /// Switch to a previously logged-in account (instant, no re-login).
+  Future<void> _switchTo(String user) async {
+    try {
+      await PipsApi.switchAccount(user);
+      restartShell();
+    } on ApiException catch (e) {
+      if (context.mounted) toast(context, e.message);
+    }
+  }
+
+  /// Log in a NEW account — after login the app switches to it automatically.
+  void _addAccount() {
+    Navigator.push(context, MaterialPageRoute(builder: (_) => AuthScreen(onAuthed: () {
+      authed.value = true;
+      restartShell();
+    })));
+  }
+
+  /// Remove a saved account from the switcher.
+  Future<void> _remove(String user) async {
+    await PipsApi.removeAccount(user);
+    accountsChanged.value++;
+  }
 
   Future<void> _report(BuildContext context) async {
     final c = TextEditingController();
@@ -44,7 +69,11 @@ class ProfilePage extends StatelessWidget {
               Container(
                 width: 84, height: 84,
                 padding: const EdgeInsets.all(14),
-                decoration: BoxDecoration(color: const Color(0xFFEAF4FF), shape: BoxShape.circle, border: Border.all(color: const Color(0xFFBFDBFE), width: 2)),
+                decoration: BoxDecoration(
+                  color: HomeColors.of(context).surfaceSoft,
+                  shape: BoxShape.circle,
+                  border: Border.all(color: HomeColors.of(context).line, width: 2),
+                ),
                 child: Image.asset('assets/logo.png', fit: BoxFit.contain),
               ),
               const SizedBox(height: 10),
@@ -54,6 +83,11 @@ class ProfilePage extends StatelessWidget {
           },
         ),
         const SizedBox(height: 14),
+        ValueListenableBuilder<int>(
+          valueListenable: accountsChanged,
+          builder: (_, __, ___) => _accountsCard(),
+        ),
+        const SizedBox(height: 12),
         _planCard(context),
         const SizedBox(height: 12),
         _optionsCard(context),
@@ -63,7 +97,20 @@ class ProfilePage extends StatelessWidget {
           const Divider(height: 1),
           ListTile(leading: const Icon(Icons.brightness_6_outlined, color: AppTheme.orange), title: const Text('Appearance'), trailing: const Icon(Icons.chevron_right), onTap: () => showDialog(context: context, builder: (ctx) => SimpleDialog(title: const Text('Theme'), children: [
                 for (final t in [('System', ThemeMode.system), ('Light', ThemeMode.light), ('Dark', ThemeMode.dark)])
-                  SimpleDialogOption(onPressed: () { themeMode.value = t.$2; Navigator.pop(ctx); }, child: Text(t.$1)),
+                  SimpleDialogOption(
+                    onPressed: () async {
+                      themeMode.value = t.$2;
+                      final p = await SharedPreferences.getInstance();
+                      await p.setString('pips_theme', t.$2 == ThemeMode.light ? 'light' : t.$2 == ThemeMode.dark ? 'dark' : 'system');
+                      Navigator.pop(ctx);
+                    },
+                    child: Row(children: [
+                      Icon(themeMode.value == t.$2 ? Icons.radio_button_checked : Icons.radio_button_off,
+                          size: 18, color: themeMode.value == t.$2 ? AppTheme.blue : null),
+                      const SizedBox(width: 10),
+                      Text(t.$1),
+                    ]),
+                  ),
               ]))),
           const Divider(height: 1),
           ListTile(leading: const Icon(Icons.menu_book_outlined, color: AppTheme.teal), title: const Text('Docs'), trailing: const Icon(Icons.open_in_new, size: 16), onTap: () => launchUrl(Uri.parse(PipsApi.base), mode: LaunchMode.externalApplication)),
@@ -81,9 +128,65 @@ class ProfilePage extends StatelessWidget {
       );
 
   // ------------------------------------------------------------- your plan
-  Widget _planCard(BuildContext context) => Container(
-        padding: const EdgeInsets.all(14),
-        decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(18), border: Border.all(color: const Color(0xFFE8EEF6))),
+  // ---------------------------------------------------------------- accounts
+  Widget _accountsCard() {
+    final hc = HomeColors.of(context);
+    final current = PipsApi.username ?? '';
+    return GlassCard(
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Row(children: [
+          const Icon(Icons.badge_outlined, size: 18, color: AppTheme.purple),
+          const SizedBox(width: 8),
+          Text('Accounts', style: TextStyle(fontWeight: FontWeight.w800, fontSize: 14.5, color: hc.text1)),
+          const Spacer(),
+          TextButton(onPressed: _addAccount, child: const Text('Add account', style: TextStyle(fontWeight: FontWeight.w800, fontSize: 12.5, color: AppTheme.blue))),
+        ]),
+        if (PipsApi.accounts.isEmpty)
+          Padding(
+            padding: const EdgeInsets.only(top: 6),
+            child: Text('Only your current account is here. Use “Add account” to sign in another user — switch between them instantly, no re-login.',
+                style: TextStyle(fontSize: 12.5, color: hc.text2, height: 1.45)),
+          )
+        else
+          for (final a in PipsApi.accounts)
+            Padding(
+              padding: const EdgeInsets.symmetric(vertical: 4),
+              child: Row(children: [
+                CircleAvatar(
+                  radius: 15,
+                  backgroundColor: a['username'] == current ? AppTheme.blueSoft : hc.surfaceSoft,
+                  child: Text(((a['username'] ?? '?').isNotEmpty ? (a['username']![0].toUpperCase()) : '?'),
+                      style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 13)),
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Text('@${a['username']}',
+                      style: TextStyle(fontWeight: FontWeight.w600, fontSize: 13.5, color: a['username'] == current ? AppTheme.blue : hc.text1)),
+                ),
+                if (a['username'] == current)
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                    decoration: BoxDecoration(color: AppTheme.blueSoft, borderRadius: BorderRadius.circular(99)),
+                    child: const Text('Active', style: TextStyle(fontSize: 10.5, fontWeight: FontWeight.w800, color: AppTheme.blue)),
+                  )
+                else ...[
+                  TextButton(
+                    onPressed: () => _switchTo(a['username']!),
+                    child: const Text('Switch', style: TextStyle(fontWeight: FontWeight.w800, fontSize: 12.5)),
+                  ),
+                  IconButton(
+                    tooltip: 'Remove from switcher',
+                    icon: const Icon(Icons.close, size: 17),
+                    onPressed: () => _remove(a['username']!),
+                  ),
+                ],
+              ]),
+            ),
+      ]),
+    );
+  }
+
+  Widget _planCard(BuildContext context) => GlassCard(
         child: Column(children: [
           FutureBuilder<Map<String, dynamic>>(
             future: PipsApi.account(),
@@ -102,7 +205,10 @@ class ProfilePage extends StatelessWidget {
                       const SizedBox(width: 6),
                       Container(
                         padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-                        decoration: BoxDecoration(color: const Color(0xFFECFDF5), borderRadius: BorderRadius.circular(99)),
+                        decoration: BoxDecoration(
+                          color: Theme.of(context).brightness == Brightness.dark ? AppTheme.green.withValues(alpha: 0.16) : const Color(0xFFECFDF5),
+                          borderRadius: BorderRadius.circular(99),
+                        ),
                         child: const Text('Free', style: TextStyle(fontSize: 10, fontWeight: FontWeight.w800, color: Color(0xFF059669))),
                       ),
                     ]),
@@ -119,7 +225,12 @@ class ProfilePage extends StatelessWidget {
           SizedBox(
             width: double.infinity,
             child: FilledButton(
-              style: FilledButton.styleFrom(backgroundColor: const Color(0xFF16181D), foregroundColor: Colors.white, padding: const EdgeInsets.symmetric(vertical: 13), shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(13))),
+              style: FilledButton.styleFrom(
+                backgroundColor: Theme.of(context).brightness == Brightness.dark ? AppTheme.blue : const Color(0xFF16181D),
+                foregroundColor: Colors.white,
+                padding: const EdgeInsets.symmetric(vertical: 13),
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(13)),
+              ),
               onPressed: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const SubscriptionPage())),
               child: const Text('Manage Your Plan', style: TextStyle(fontWeight: FontWeight.w800)),
             ),
@@ -128,7 +239,9 @@ class ProfilePage extends StatelessWidget {
       );
 
   // ------------------------------------------------------------- options
-  Widget _optionsCard(BuildContext context) => Card(child: Column(children: [
+  Widget _optionsCard(BuildContext context) => GlassCard(
+        padding: const EdgeInsets.symmetric(vertical: 6),
+        child: Column(children: [
         FutureBuilder<bool>(
           future: _cameraPref(),
           builder: (_, s) => SwitchListTile(
@@ -197,7 +310,7 @@ class _ApiKeysPageState extends State<ApiKeysPage> {
           key: refresh,
           future: PipsApi.account(),
           builder: (_, s) {
-            if (s.connectionState != ConnectionState.done) return const Loading();
+            if (s.connectionState != ConnectionState.done) return const SkeletonScreen();
             final a = s.data ?? {};
             final keys = (a['keys'] ?? a['api_keys'] ?? const []) as List;
             if (keys.isEmpty) return const EmptyState(icon: '🔑', text: 'No API keys yet.');

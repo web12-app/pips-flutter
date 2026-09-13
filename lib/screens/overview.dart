@@ -30,7 +30,22 @@ class _OverviewPageState extends State<OverviewPage> {
         key: refresh,
         future: Future.wait<dynamic>([PipsApi.account(), PipsApi.filesAll()]),
         builder: (_, s) {
-          if (s.connectionState != ConnectionState.done) return const Loading();
+          if (s.connectionState != ConnectionState.done) {
+            return ListView(
+              padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
+              children: const [
+                SizedBox(height: 46),
+                SizedBox(height: 14),
+                SkeletonBox(height: 46, radius: 14),
+                SizedBox(height: 14),
+                SkeletonBox(height: 42, radius: 13),
+                SizedBox(height: 18),
+                SkeletonCard(height: 240),
+                SizedBox(height: 12),
+                SkeletonCard(height: 220),
+              ],
+            );
+          }
           final account = (s.data?[0] as Map<String, dynamic>?) ?? <String, dynamic>{};
           final all = ((s.data?[1] as List<dynamic>?) ?? const [])
               .map((e) => Entry(Map<String, dynamic>.from(e as Map)))
@@ -221,14 +236,7 @@ class _OverviewPageState extends State<OverviewPage> {
 
     void openFilter(String f) => Navigator.push(context, MaterialPageRoute(builder: (_) => FilesPage(initialFilter: f)));
 
-    return Container(
-      padding: const EdgeInsets.all(14),
-      decoration: BoxDecoration(
-        color: hc.surface,
-        borderRadius: BorderRadius.circular(18),
-        border: Border.all(color: hc.line),
-        boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.04), blurRadius: 14, offset: const Offset(0, 5))],
-      ),
+    return GlassCard(
       child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
         Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
           Text('Recent Files & Folders', style: TextStyle(fontWeight: FontWeight.w800, fontSize: 14.5, color: hc.text1)),
@@ -266,14 +274,7 @@ class _OverviewPageState extends State<OverviewPage> {
   Widget _activityCard(BuildContext context, List<Entry> all) {
     final latest = all.take(3).toList();
     final hc = HomeColors.of(context);
-    return Container(
-      padding: const EdgeInsets.all(14),
-      decoration: BoxDecoration(
-        color: hc.surface,
-        borderRadius: BorderRadius.circular(18),
-        border: Border.all(color: hc.line),
-        boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.04), blurRadius: 14, offset: const Offset(0, 5))],
-      ),
+    return GlassCard(
       child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
         Text('Recent Activity', style: TextStyle(fontWeight: FontWeight.w800, fontSize: 14.5, color: hc.text1)),
         const SizedBox(height: 2),

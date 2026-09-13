@@ -21,7 +21,7 @@ class _TrashPageState extends State<TrashPage> {
           key: refresh,
           future: PipsApi.filesTrash(),
           builder: (_, s) {
-            if (s.connectionState != ConnectionState.done) return const Loading();
+            if (s.connectionState != ConnectionState.done) return const SkeletonScreen();
             final items = (s.data ?? []).map((e) => Entry(Map<String, dynamic>.from(e as Map))).toList();
             if (items.isEmpty) return const EmptyState(icon: '🗑️', text: 'Trash is empty.');
             return ListView.builder(itemCount: items.length, itemBuilder: (_, i) => ListTile(
@@ -46,7 +46,7 @@ class HistoryPage extends StatelessWidget {
         body: FutureBuilder<List<dynamic>>(
           future: PipsApi.filesRecent(50),
           builder: (_, s) {
-            if (s.connectionState != ConnectionState.done) return const Loading();
+            if (s.connectionState != ConnectionState.done) return const SkeletonScreen();
             final items = (s.data ?? []).map((e) => Entry(Map<String, dynamic>.from(e as Map))).toList();
             if (items.isEmpty) return const EmptyState(icon: '🕓', text: 'No uploads yet.');
             return ListView.builder(itemCount: items.length, itemBuilder: (_, i) => fileTile(context, items[i], () {}, gallery: items));
@@ -73,7 +73,7 @@ class _SearchPageState extends State<SearchPage> {
         body: q.trim().length < 2 ? const EmptyState(icon: '🔍', text: 'Type to search your files, videos and channels.') : FutureBuilder<List<dynamic>>(
           future: Future.wait<dynamic>([PipsApi.search(q), PipsApi.channelsGlobalFileSearch(q), PipsApi.channelsPublic(q)]),
           builder: (_, s) {
-            if (s.connectionState != ConnectionState.done) return const Loading();
+            if (s.connectionState != ConnectionState.done) return const SkeletonScreen();
             final r0 = (s.data?[0] as Map<String, dynamic>?) ?? <String, dynamic>{};
             final files = ((r0['files'] ?? r0['results'] ?? const []) as List).map((e) => Entry(Map<String, dynamic>.from(e as Map))).toList();
             final vids = <ChanItem>[
@@ -158,7 +158,7 @@ class _NotificationsPageState extends State<NotificationsPage> {
           key: refresh,
           future: PipsApi.notifications(),
           builder: (_, s) {
-            if (s.connectionState != ConnectionState.done) return const Loading();
+            if (s.connectionState != ConnectionState.done) return const SkeletonScreen();
             final items = (s.data ?? []);
             if (items.isEmpty) return const EmptyState(icon: '🔔', text: 'No notifications.');
             return ListView.builder(itemCount: items.length, itemBuilder: (_, i) {

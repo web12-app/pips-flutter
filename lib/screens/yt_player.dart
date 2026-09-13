@@ -6,6 +6,7 @@ import 'package:video_player/video_player.dart';
 import '../api.dart';
 import '../mini_player.dart';
 import '../models.dart';
+import '../services/pip.dart';
 import '../widgets.dart';
 
 String _fmtDur(Duration d) {
@@ -82,7 +83,7 @@ class ChannelVideoPage extends StatefulWidget {
   State<ChannelVideoPage> createState() => _ChannelVideoPageState();
 }
 
-class _ChannelVideoPageState extends State<ChannelVideoPage> {
+class _ChannelVideoPageState extends State<ChannelVideoPage> with WidgetsBindingObserver {
   VideoPlayerController? c;
   late Entry cur = widget.video;
   late String curTitle = widget.videoTitle;
@@ -113,12 +114,14 @@ class _ChannelVideoPageState extends State<ChannelVideoPage> {
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     MiniPlayer.i.stop(); // opening the full page always closes the mini window
     _load(cur, title: curTitle);
   }
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     hide?.cancel();
     _applySystemUi(false);
     final cc = c;
@@ -143,6 +146,21 @@ class _ChannelVideoPageState extends State<ChannelVideoPage> {
     c = null;
     listCtrl.dispose();
     super.dispose();
+  }
+
+  /// Background the app while a video is playing → keep it alive in a
+  /// floating Picture-in-Picture window (Android 8+). Coming back out of PiP
+  /// (or normal resume) restores the full screen.
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    final cc = c;
+    if (state == AppLifecycleState.paused) {
+      if (cc != null && cc.value.isInitialized && cc.value.isPlaying && !handedToMini) {
+        PipsPip.enter();
+      }
+    } else if (state == AppLifecycleState.resumed) {
+      if (!handedToMini) PipsPip.exit();
+    }
   }
 
   void _applySystemUi(bool fullscreen) {
@@ -334,6 +352,25 @@ class _ChannelVideoPageState extends State<ChannelVideoPage> {
           child: _controls(v, posMs, durMs),
         ),
       ),
+      // Always-visible back action — works from the player, fullscreen and
+      // mid-gesture alike (in addition to the system back + swipe-down).
+      Positioned(
+        top: 10,
+        left: 10,
+        child: GestureDetector(
+          onTap: () => Navigator.of(context).maybePop(),
+          child: Container(
+            width: 38,
+            height: 38,
+            decoration: BoxDecoration(
+              color: Colors.black.withValues(alpha: 0.45),
+              shape: BoxShape.circle,
+              border: Border.all(color: Colors.white.withValues(alpha: 0.28)),
+            ),
+            child: const Icon(Icons.arrow_back_ios_new, color: Colors.white, size: 19),
+          ),
+        ),
+      ),
       if (bubble != null)
         Center(
           child: IgnorePointer(
@@ -407,25 +444,22 @@ class _ChannelVideoPageState extends State<ChannelVideoPage> {
           ),
         ]),
       ),
-      Container(
-        margin: const EdgeInsets.fromLTRB(12, 4, 12, 6),
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-        decoration: BoxDecoration(
-          color: Theme.of(context).cardColor,
-          borderRadius: BorderRadius.circular(14),
-          border: Border.all(color: Theme.of(context).dividerColor),
+      Padding(
+        padding: const EdgeInsets.fromLTRB(12, 4, 12, 6),
+        child: GlassCard(
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+          child: Row(children: [
+            ChannelAvatar(fileId: curChannelLogoId, name: curChannelName, radius: 18),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                Text(curChannelName, maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 14)),
+                Text('@${curChannelOwner}', maxLines: 1, overflow: TextOverflow.ellipsis, style: TextStyle(fontSize: 11.5, color: Colors.grey.shade600)),
+              ]),
+            ),
+            Icon(Icons.subscriptions_outlined, size: 18, color: Colors.grey.shade500),
+          ]),
         ),
-        child: Row(children: [
-          ChannelAvatar(fileId: curChannelLogoId, name: curChannelName, radius: 18),
-          const SizedBox(width: 10),
-          Expanded(
-            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-              Text(curChannelName, maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 14)),
-              Text('@${curChannelOwner}', maxLines: 1, overflow: TextOverflow.ellipsis, style: TextStyle(fontSize: 11.5, color: Colors.grey.shade600)),
-            ]),
-          ),
-          Icon(Icons.subscriptions_outlined, size: 18, color: Colors.grey.shade500),
-        ]),
       ),
       const Padding(padding: EdgeInsets.fromLTRB(16, 10, 16, 4), child: Text('Up next', style: TextStyle(fontWeight: FontWeight.w800, fontSize: 15))),
       if (related.isEmpty)

@@ -55,7 +55,7 @@ class _MineChannelsState extends State<_MineChannels> {
         key: refresh,
         future: PipsApi.channelsMine(),
         builder: (_, s) {
-          if (s.connectionState != ConnectionState.done) return const Loading();
+          if (s.connectionState != ConnectionState.done) return const SkeletonScreen();
           final r = s.data ?? {};
           final list = (r['channels'] ?? r['mine'] ?? const []) as List;
           if (list.isEmpty) return const EmptyState(icon: '📺', text: 'You have no channels yet. Tap Create to start one.');
@@ -75,13 +75,13 @@ class _PublicChannelsState extends State<_PublicChannels> {
   @override
   Widget build(BuildContext context) => Column(children: [
         Padding(padding: const EdgeInsets.all(12), child: TextField(
-          decoration: InputDecoration(hintText: 'Search public channels…', prefixIcon: const Icon(Icons.search), filled: true, fillColor: const Color(0xFFF8FAFC), border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide.none)),
+          decoration: InputDecoration(hintText: 'Search public channels…', prefixIcon: const Icon(Icons.search), filled: true, fillColor: HomeColors.of(context).surfaceSoft, border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide.none)),
           onChanged: (v) => setState(() => q = v),
         )),
         Expanded(child: FutureBuilder<List<dynamic>>(
           future: PipsApi.channelsPublic(q),
           builder: (_, s) {
-            if (s.connectionState != ConnectionState.done) return const Loading();
+            if (s.connectionState != ConnectionState.done) return const SkeletonScreen();
             final list = (s.data ?? []);
             if (list.isEmpty) return const EmptyState(icon: '📺', text: 'No channels found.');
             return ListView.builder(itemCount: list.length, itemBuilder: (_, i) => _channelTile(context, Map<String, dynamic>.from(list[i] as Map), mine: false, onChanged: () {}));
@@ -189,7 +189,7 @@ class _ChannelPageState extends State<ChannelPage> {
           key: refresh,
           future: PipsApi.channelGet(widget.id),
           builder: (_, s) {
-            if (s.connectionState != ConnectionState.done) return const Loading();
+            if (s.connectionState != ConnectionState.done) return const SkeletonScreen();
             if (s.hasError) return const EmptyState(icon: '⚠️', text: 'Could not load this channel.');
             final ch = s.data?['channel'];
             if (ch is! Map) return const EmptyState(icon: '📺', text: 'Channel not found.');
@@ -438,7 +438,10 @@ class _AddVideoSheetState extends State<AddVideoSheet> {
               ] else ...[
                 Container(
                   padding: const EdgeInsets.all(10),
-                  decoration: BoxDecoration(color: const Color(0xFFF0F9FF), borderRadius: BorderRadius.circular(12)),
+                  decoration: BoxDecoration(
+                    color: Theme.of(context).brightness == Brightness.dark ? AppTheme.blue.withValues(alpha: 0.14) : const Color(0xFFF0F9FF),
+                    borderRadius: BorderRadius.circular(12),
+                  ),
                   child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
                     Row(children: [
                       const Icon(Icons.videocam, size: 18, color: AppTheme.blue),

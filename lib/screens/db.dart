@@ -33,7 +33,7 @@ class _DbPageState extends State<DbPage> {
           key: refresh,
           future: PipsApi.dbFiles(),
           builder: (_, s) {
-            if (s.connectionState != ConnectionState.done) return const Loading();
+            if (s.connectionState != ConnectionState.done) return const SkeletonScreen();
             final items = (s.data ?? []);
             if (items.isEmpty) return const EmptyState(icon: '🗄️', text: 'No documents yet.');
             return ListView.builder(itemCount: items.length, itemBuilder: (_, i) {

@@ -31,7 +31,7 @@ class _PhotosPageState extends State<PhotosPage> {
             key: refresh,
             future: PipsApi.filesAll(),
             builder: (_, s) {
-              if (s.connectionState != ConnectionState.done) return const Loading();
+              if (s.connectionState != ConnectionState.done) return const SkeletonScreen();
               final all = (s.data ?? []).map((e) => Entry(Map<String, dynamic>.from(e as Map))).where((e) => isImage(e.mime, e.name) && !e.isDb).toList()
                 ..sort((a, b) => b.uploadedAt.compareTo(a.uploadedAt));
               if (all.isEmpty) return const EmptyState(icon: '🖼️', text: 'No photos yet.\nUpload some with the + button.');

@@ -38,7 +38,7 @@ class _FilesPageState extends State<FilesPage> {
         ]),
         body: Column(children: [
           Padding(padding: const EdgeInsets.fromLTRB(16, 8, 16, 4), child: TextField(
-            decoration: InputDecoration(hintText: 'Search files', prefixIcon: const Icon(Icons.search), filled: true, fillColor: const Color(0xFFF8FAFC), border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide.none)),
+            decoration: InputDecoration(hintText: 'Search files', prefixIcon: const Icon(Icons.search), filled: true, fillColor: HomeColors.of(context).surfaceSoft, border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide.none)),
             onChanged: (v) => setState(() => q = v),
           )),
           SizedBox(height: 46, child: ListView(scrollDirection: Axis.horizontal, padding: const EdgeInsets.symmetric(horizontal: 12), children: [
@@ -63,7 +63,7 @@ class _FilesPageState extends State<FilesPage> {
                 ? PipsApi.filesAll()
                 : PipsApi.search(q, filter.isEmpty ? null : filter).then((r) => r['files'] is List ? r['files'] as List : (r['results'] is List ? r['results'] as List : <dynamic>[])),
             builder: (_, s) {
-              if (s.connectionState != ConnectionState.done) return const Loading();
+              if (s.connectionState != ConnectionState.done) return const SkeletonScreen();
               final items = (s.data ?? []).map((e) => Entry(Map<String, dynamic>.from(e as Map))).toList();
               if (filter == 'image') items.removeWhere((e) => !isImage(e.mime, e.name) || e.isDb);
               if (filter == 'video') items.removeWhere((e) => !isVideo(e.mime, e.name));
@@ -80,18 +80,22 @@ class _FilesPageState extends State<FilesPage> {
           )),
         ]),
       );
-  Widget _pill(String label, IconData icon, Color fg, Color bg, VoidCallback onTap) => GestureDetector(
-        onTap: onTap,
-        child: Container(
-          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
-          decoration: BoxDecoration(color: bg, borderRadius: BorderRadius.circular(12)),
+  Widget _pill(String label, IconData icon, Color fg, Color bg, VoidCallback onTap) {
+    // Pastel chips read badly on dark surfaces — tint with the icon color instead.
+    final b = Theme.of(context).brightness == Brightness.dark ? fg.withValues(alpha: 0.16) : bg;
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+        decoration: BoxDecoration(color: b, borderRadius: BorderRadius.circular(12)),
           child: Row(mainAxisSize: MainAxisSize.min, children: [
             Icon(icon, size: 17, color: fg),
             const SizedBox(width: 6),
             Text(label, style: TextStyle(color: fg, fontWeight: FontWeight.w700, fontSize: 13)),
           ]),
-        ),
-      );
+      ),
+    );
+  }
 
   Widget _sortChip() => ActionChip(
         avatar: const Icon(Icons.sort, size: 16, color: AppTheme.blue),
@@ -321,7 +325,7 @@ class VersionsPage extends StatelessWidget {
         body: FutureBuilder<List<dynamic>>(
           future: PipsApi.versions(e.id),
           builder: (_, s) {
-            if (s.connectionState != ConnectionState.done) return const Loading();
+            if (s.connectionState != ConnectionState.done) return const SkeletonScreen();
             final vs = s.data ?? [];
             if (vs.isEmpty) return const EmptyState(icon: '🕓', text: 'No older versions.');
             return ListView.builder(itemCount: vs.length, itemBuilder: (_, i) {
@@ -370,7 +374,7 @@ class _FoldersPageState extends State<FoldersPage> {
           key: refresh,
           future: PipsApi.folders(),
           builder: (_, s) {
-            if (s.connectionState != ConnectionState.done) return const Loading();
+            if (s.connectionState != ConnectionState.done) return const SkeletonScreen();
             final items = (s.data ?? []);
             if (items.isEmpty) return const EmptyState(icon: '📁', text: 'No folders yet.');
             return ListView.builder(itemCount: items.length, itemBuilder: (_, i) {
@@ -418,7 +422,7 @@ class _FolderPageState extends State<FolderPage> {
           key: refresh,
           future: PipsApi.filesTree(widget.folder),
           builder: (_, s) {
-            if (s.connectionState != ConnectionState.done) return const Loading();
+            if (s.connectionState != ConnectionState.done) return const SkeletonScreen();
             final tree = s.data ?? {};
             final entries = (tree[widget.folder] ?? tree[''] ?? const []) as List;
             if (entries.isEmpty) return const EmptyState(icon: '📂', text: 'This folder is empty.');
@@ -530,7 +534,7 @@ class _CloudExplorerPageState extends State<CloudExplorerPage> {
             key: refresh,
             future: Future.wait<dynamic>([PipsApi.folders(), PipsApi.filesTree(path)]),
             builder: (_, s) {
-              if (s.connectionState != ConnectionState.done) return const Loading();
+              if (s.connectionState != ConnectionState.done) return const SkeletonScreen();
               final folders = (s.data?[0] as List<dynamic>?) ?? const <dynamic>[];
               final resp = (s.data?[1] as Map<String, dynamic>?) ?? const <String, dynamic>{};
               final tree = (resp['tree'] is Map ? resp['tree'] : const {}) as Map;

@@ -22,7 +22,7 @@ class _InboxPageState extends State<InboxPage> {
           key: refresh,
           future: PipsApi.inbox(),
           builder: (_, s) {
-            if (s.connectionState != ConnectionState.done) return const Loading();
+            if (s.connectionState != ConnectionState.done) return const SkeletonScreen();
             final items = (s.data ?? []);
             if (items.isEmpty) return const EmptyState(icon: '💬', text: 'No conversations yet.');
             return RefreshIndicator(onRefresh: () async => setState(() => refresh = UniqueKey()), child: ListView.builder(itemCount: items.length, itemBuilder: (_, i) {
@@ -80,7 +80,7 @@ class _ChatPageState extends State<ChatPage> {
             key: refresh,
             future: PipsApi.chat(widget.peer),
             builder: (_, s) {
-              if (s.connectionState != ConnectionState.done) return const Loading();
+              if (s.connectionState != ConnectionState.done) return const SkeletonScreen();
               final msgs = (s.data ?? []).reversed.toList();
               return ListView.builder(reverse: true, padding: const EdgeInsets.all(12), itemCount: msgs.length, itemBuilder: (_, i) {
                 final m = Map<String, dynamic>.from(msgs[i] as Map);
@@ -138,7 +138,7 @@ class _UserSearchPageState extends State<UserSearchPage> {
         body: FutureBuilder<List<dynamic>>(
           future: PipsApi.socialUsers(q),
           builder: (_, s) {
-            if (s.connectionState != ConnectionState.done) return const Loading();
+            if (s.connectionState != ConnectionState.done) return const SkeletonScreen();
             final users = (s.data ?? []);
             if (users.isEmpty) return const EmptyState(icon: '👥', text: 'No users found.');
             return ListView.builder(itemCount: users.length, itemBuilder: (_, i) {

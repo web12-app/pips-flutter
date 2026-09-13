@@ -29,10 +29,37 @@ class PipsApi {
   static String? session;
   static String? username;
 
+  /// All previously logged-in accounts (multi-account switcher).
+  /// Each entry: {'username': '…', 'session': '…'} — newest first.
+  static List<Map<String, String>> accounts = [];
+
   static Future<void> loadSession() async {
     final p = await SharedPreferences.getInstance();
     session = p.getString('pips_session');
     username = p.getString('pips_user');
+    accounts = (p.getStringList('pips_accounts') ?? const [])
+        .map((s) {
+          try {
+            return Map<String, String>.from(jsonDecode(s) as Map);
+          } catch (_) {
+            return <String, String>{};
+          }
+        })
+        .where((m) => (m['session'] ?? '').isNotEmpty)
+        .toList();
+    if (session != null && session!.isNotEmpty && username != null && username!.isNotEmpty) {
+      _upsertAccount(username!, session!);
+    }
+  }
+
+  static void _upsertAccount(String user, String cookie) {
+    accounts.removeWhere((a) => a['username'] == user);
+    accounts.insert(0, {'username': user, 'session': cookie});
+  }
+
+  static Future<void> _persistAccounts() async {
+    final p = await SharedPreferences.getInstance();
+    await p.setStringList('pips_accounts', accounts.map((a) => jsonEncode(a)).toList());
   }
 
   static Future<void> _saveSession(String? s, String? user) async {
@@ -42,10 +69,31 @@ class PipsApi {
     if (s == null) {
       await p.remove('pips_session');
       await p.remove('pips_user');
+      if (user != null) {
+        accounts.removeWhere((a) => a['username'] == user);
+        await _persistAccounts();
+      }
     } else {
       await p.setString('pips_session', s);
       await p.setString('pips_user', user ?? '');
+      if (user != null && user.isNotEmpty) {
+        _upsertAccount(user, s);
+        await _persistAccounts();
+      }
     }
+  }
+
+  /// Instantly switch to a previously logged-in account (no re-login).
+  static Future<void> switchAccount(String user) async {
+    final a = accounts.firstWhere((x) => x['username'] == user, orElse: () => const <String, String>{});
+    if ((a['session'] ?? '').isEmpty) throw ApiException('Account not found on this device.', 0);
+    await _saveSession(a['session'], user);
+  }
+
+  /// Remove a saved account from the switcher (its session is discarded).
+  static Future<void> removeAccount(String user) async {
+    accounts.removeWhere((a) => a['username'] == user);
+    await _persistAccounts();
   }
 
   static Map<String, String> get _headers => {

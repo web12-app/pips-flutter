@@ -19,6 +19,16 @@ import 'screens/yt_player.dart';
 final authed = ValueNotifier(PipsApi.session != null && PipsApi.session!.isNotEmpty);
 final themeMode = ValueNotifier(ThemeMode.system);
 final onboardingDone = ValueNotifier(true); // set from prefs in main()
+final accountsChanged = ValueNotifier(0); // bump to refresh the account switcher
+
+/// Full UI reset — used after switching accounts so every screen re-fetches
+/// data for the new user.
+void restartShell() {
+  navKey.currentState?.pushAndRemoveUntil(
+    MaterialPageRoute(builder: (_) => const MainShell()),
+    (__) => false,
+  );
+}
 
 // Instantiate early (singleton) to catch the very first link on cold start.
 final appLinks = AppLinks();
@@ -97,6 +107,8 @@ void main() async {
   try {
     final p = await SharedPreferences.getInstance();
     onboardingDone.value = p.getBool('onboarding_done') ?? false;
+    final t = p.getString('pips_theme');
+    themeMode.value = t == 'light' ? ThemeMode.light : t == 'dark' ? ThemeMode.dark : ThemeMode.system;
   } catch (_) {}
   runApp(const PipsApp());
   WidgetsBinding.instance.addPostFrameCallback((_) => _flushPendingPipsLink());

@@ -189,6 +189,147 @@ class Loading extends StatelessWidget {
       );
 }
 
+// ------------------------------------------------- skeleton shimmer loading
+/// Lightweight shimmer sweep (no dependencies) — wrap a placeholder shape.
+class Shimmer extends StatefulWidget {
+  final Widget child;
+  const Shimmer({super.key, required this.child});
+  @override
+  State<Shimmer> createState() => _ShimmerState();
+}
+
+class _ShimmerState extends State<Shimmer> with SingleTickerProviderStateMixin {
+  late final AnimationController _c =
+      AnimationController(vsync: this, duration: const Duration(milliseconds: 1300))..repeat();
+
+  @override
+  void dispose() {
+    _c.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final dark = Theme.of(context).brightness == Brightness.dark;
+    final base = dark ? const Color(0xFF1C1C1E) : const Color(0xFFF1F3F7);
+    final hi = dark ? const Color(0xFF303034) : const Color(0xFFFFFFFF);
+    return AnimatedBuilder(
+      animation: _c,
+      builder: (_, __) {
+        final t = _c.value;
+        final b = Alignment(-1.8 + 2.6 * t, -0.3);
+        final e = Alignment(b.dx + 1.2, b.dy + 0.6);
+        return ShaderMask(
+          blendMode: BlendMode.dstIn,
+          shaderCallback: (r) => LinearGradient(
+            begin: b,
+            end: e,
+            colors: [base, hi, base],
+          ).createShader(r),
+          child: widget.child,
+        );
+      },
+    );
+  }
+}
+
+/// Skeleton rows that mimic the file list — use while cloud data loads.
+class SkeletonList extends StatelessWidget {
+  final int rows;
+  final double rowHeight;
+  const SkeletonList({super.key, this.rows = 6, this.rowHeight = 66});
+  @override
+  Widget build(BuildContext context) => Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          for (var i = 0; i < rows; i++)
+            Padding(
+              padding: const EdgeInsets.only(bottom: 10),
+              child: Shimmer(
+                child: Container(
+                  height: rowHeight,
+                  decoration: const BoxDecoration(borderRadius: BorderRadius.all(Radius.circular(14))),
+                ),
+              ),
+            ),
+        ],
+      );
+}
+
+/// Skeleton for a big card (feed, explorer…).
+class SkeletonCard extends StatelessWidget {
+  final double height;
+  const SkeletonCard({super.key, this.height = 220});
+  @override
+  Widget build(BuildContext context) => SkeletonBox(height: height, radius: 18);
+}
+
+/// Theme-aware shimmer box.
+class SkeletonBox extends StatelessWidget {
+  final double? height;
+  final double? width;
+  final double radius;
+  const SkeletonBox({super.key, this.height, this.width, this.radius = 12});
+  @override
+  Widget build(BuildContext context) {
+    final hc = HomeColors.of(context);
+    return Shimmer(
+      child: Container(
+        height: height,
+        width: width,
+        decoration: BoxDecoration(color: hc.surfaceSoft, borderRadius: BorderRadius.circular(radius)),
+      ),
+    );
+  }
+}
+
+/// Full-area skeleton placeholder for loading lists (any screen).
+class SkeletonScreen extends StatelessWidget {
+  final int rows;
+  const SkeletonScreen({super.key, this.rows = 6});
+  @override
+  Widget build(BuildContext context) => Padding(
+        padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
+        child: SkeletonList(rows: rows),
+      );
+}
+
+// ------------------------------------------------- glassmorphism card
+/// Frosted-glass style card — translucent surface, hairline border, soft
+/// shadow and a subtle top light sweep. Works in light and dark mode.
+class GlassCard extends StatelessWidget {
+  final Widget child;
+  final EdgeInsets padding;
+  final VoidCallback? onTap;
+  final double radius;
+  const GlassCard({super.key, required this.child, this.padding = const EdgeInsets.all(14), this.onTap, this.radius = 18});
+  @override
+  Widget build(BuildContext context) {
+    final hc = HomeColors.of(context);
+    final card = Container(
+      padding: padding,
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(radius),
+        border: Border.all(color: hc.line),
+        gradient: LinearGradient(
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+          colors: [
+            (Theme.of(context).brightness == Brightness.dark ? const Color(0xFF2C2C2E) : Colors.white).withValues(alpha: 0.92),
+            (Theme.of(context).brightness == Brightness.dark ? const Color(0xFF1C1C1E) : const Color(0xFFF7FAFF)).withValues(alpha: 0.75),
+          ],
+        ),
+        boxShadow: [
+          BoxShadow(color: Colors.black.withValues(alpha: 0.06), blurRadius: 16, offset: const Offset(0, 6)),
+        ],
+      ),
+      child: child,
+    );
+    if (onTap == null) return card;
+    return GestureDetector(onTap: onTap, child: card);
+  }
+}
+
 final _fileImgCache = <String, List<int>>{};
 
 /// Fetch (and cache) a small cloud file as image bytes — used for channel logos.

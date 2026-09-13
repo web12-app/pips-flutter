@@ -2,6 +2,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:video_player/video_player.dart';
 import 'models.dart';
+import 'services/pip.dart';
 import 'widgets.dart';
 import 'screens/yt_player.dart';
 
@@ -122,16 +123,18 @@ class _MiniCard extends StatefulWidget {
   State<_MiniCard> createState() => _MiniCardState();
 }
 
-class _MiniCardState extends State<_MiniCard> {
+class _MiniCardState extends State<_MiniCard> with WidgetsBindingObserver {
   late Offset _pos = MiniPlayer.i.pos;
   bool dragging = false;
   Timer? _t;
+  bool _inPip = false;
 
   static const double _w = 216;
 
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _t = Timer.periodic(const Duration(milliseconds: 500), (_) {
       if (mounted) setState(() {});
     });
@@ -140,7 +143,23 @@ class _MiniCardState extends State<_MiniCard> {
   @override
   void dispose() {
     _t?.cancel();
+    WidgetsBinding.instance.removeObserver(this);
     super.dispose();
+  }
+
+  /// App backgrounded while the mini window is playing → keep the video alive
+  /// in a floating Picture-in-Picture window (Android 8+).
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    final c = MiniPlayer.i.c;
+    if (state == AppLifecycleState.paused) {
+      if (c != null && c.value.isInitialized && c.value.isPlaying) {
+        PipsPip.enter().then((ok) => _inPip = ok);
+      }
+    } else if (state == AppLifecycleState.resumed && _inPip) {
+      _inPip = false;
+      PipsPip.exit();
+    }
   }
 
   @override
