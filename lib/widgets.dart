@@ -218,7 +218,7 @@ class _ShimmerState extends State<Shimmer> with SingleTickerProviderStateMixin {
       builder: (_, __) {
         final t = _c.value;
         final b = Alignment(-1.8 + 2.6 * t, -0.3);
-        final e = Alignment(b.dx + 1.2, b.dy + 0.6);
+        final e = Alignment(b.x + 1.2, b.y + 0.6);
         return ShaderMask(
           blendMode: BlendMode.dstIn,
           shaderCallback: (r) => LinearGradient(
@@ -294,42 +294,6 @@ class SkeletonScreen extends StatelessWidget {
       );
 }
 
-// ------------------------------------------------- glassmorphism card
-/// Frosted-glass style card — translucent surface, hairline border, soft
-/// shadow and a subtle top light sweep. Works in light and dark mode.
-class GlassCard extends StatelessWidget {
-  final Widget child;
-  final EdgeInsets padding;
-  final VoidCallback? onTap;
-  final double radius;
-  const GlassCard({super.key, required this.child, this.padding = const EdgeInsets.all(14), this.onTap, this.radius = 18});
-  @override
-  Widget build(BuildContext context) {
-    final hc = HomeColors.of(context);
-    final card = Container(
-      padding: padding,
-      decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(radius),
-        border: Border.all(color: hc.line),
-        gradient: LinearGradient(
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-          colors: [
-            (Theme.of(context).brightness == Brightness.dark ? const Color(0xFF2C2C2E) : Colors.white).withValues(alpha: 0.92),
-            (Theme.of(context).brightness == Brightness.dark ? const Color(0xFF1C1C1E) : const Color(0xFFF7FAFF)).withValues(alpha: 0.75),
-          ],
-        ),
-        boxShadow: [
-          BoxShadow(color: Colors.black.withValues(alpha: 0.06), blurRadius: 16, offset: const Offset(0, 6)),
-        ],
-      ),
-      child: child,
-    );
-    if (onTap == null) return card;
-    return GestureDetector(onTap: onTap, child: card);
-  }
-}
-
 final _fileImgCache = <String, List<int>>{};
 
 /// Fetch (and cache) a small cloud file as image bytes — used for channel logos.
@@ -345,6 +309,109 @@ Future<Uint8List?> loadFileImage(String? id) async {
   } catch (_) {
     return null;
   }
+}
+
+// ------------------------------------------------- profile photo (avatar)
+final _avatarUrlCache = <String, String>{};
+final _avatarBytesCache = <String, List<int>>{};
+
+Future<Uint8List?> _loadAvatarBytes(String url) async {
+  final hit = _avatarBytesCache[url];
+  if (hit != null) return Uint8List.fromList(hit);
+  try {
+    final full = url.startsWith('http') ? url : '${PipsApi.base}$url';
+    final b = await PipsApi.getBytes(full).timeout(const Duration(seconds: 20));
+    if (b.isEmpty) return null;
+    if (_avatarBytesCache.length > 40) _avatarBytesCache.clear();
+    _avatarBytesCache[url] = b;
+    return Uint8List.fromList(b);
+  } catch (_) {
+    return null;
+  }
+}
+
+static const _avatarColors = [
+  Color(0xFF0B6EF0), Color(0xFF8B5CF6), Color(0xFFF59E0B),
+  Color(0xFF16A34A), Color(0xFFDC2626), Color(0xFF14B8A6), Color(0xFFDB2777),
+];
+
+/// Round profile photo for a user — cloud photo with a coloured letter fallback.
+/// Pass a non-empty [bust] to force the letter fallback (e.g. after removal).
+class AvatarTile extends StatelessWidget {
+  final String username;
+  final double radius;
+  final String? name;
+  final String bust;
+  const AvatarTile({super.key, required this.username, this.radius = 20, this.name, this.bust = ''});
+  @override
+  Widget build(BuildContext context) {
+    final u = username.isEmpty ? '?' : username;
+    Color bg() {
+      var h = 0;
+      for (final r in u.runes) h = (h * 31 + r) & 0x7fffffff;
+      return _avatarColors[h % _avatarColors.length];
+    }
+
+    Widget fallback([String? who]) => CircleAvatar(
+          radius: radius,
+          backgroundColor: bg(),
+          child: Text((who ?? (name ?? u)).isNotEmpty ? (who ?? (name ?? u))[0].toUpperCase() : '?',
+              style: TextStyle(color: Colors.white, fontSize: radius * 0.85, fontWeight: FontWeight.w700)),
+        );
+
+    final keyUrl = _avatarUrlCache[u];
+    if (keyUrl == null && bust.isNotEmpty) return fallback();
+    return FutureBuilder<Uint8List?>(
+      future: (keyUrl != null
+          ? _loadAvatarBytes(keyUrl)
+          : PipsApi.avatarUrl(u).then((url) {
+              if (url == null) return null;
+              _avatarUrlCache[u] = url;
+              return _loadAvatarBytes(url);
+            })),
+      builder: (_, s) {
+        final img = s.data;
+        if (img != null && img.isNotEmpty) {
+          return CircleAvatar(radius: radius, backgroundColor: bg(), foregroundImage: MemoryImage(img));
+        }
+        return fallback();
+      },
+    );
+  }
+
+  /// Drop the cached photo for a user (call after updating the profile photo).
+  static void bust(String username) {
+    _avatarUrlCache.remove(username);
+    _avatarBytesCache.clear();
+  }
+}
+
+/// Yes/No confirm shown before ANY destructive action in the app.
+/// Resolves true only when the user taps "Yes, …".
+Future<bool> confirmDelete(
+  BuildContext context, {
+  String title = 'Delete?',
+  String message = 'This cannot be undone.',
+  String confirmLabel = 'Yes, delete',
+  String cancelLabel = 'No, keep it',
+}) async {
+  final ok = await showDialog<bool>(
+    context: context,
+    builder: (ctx) => AlertDialog(
+      icon: const Icon(Icons.delete_outline, color: AppTheme.red),
+      title: Text(title, style: const TextStyle(fontWeight: FontWeight.w800)),
+      content: Text(message, style: const TextStyle(fontSize: 13.5, height: 1.4)),
+      actions: [
+        TextButton(onPressed: () => Navigator.pop(ctx, false), child: Text(cancelLabel, style: const TextStyle(fontWeight: FontWeight.w600))),
+        FilledButton(
+          style: FilledButton.styleFrom(backgroundColor: AppTheme.red),
+          onPressed: () => Navigator.pop(ctx, true),
+          child: Text(confirmLabel, style: const TextStyle(fontWeight: FontWeight.w800)),
+        ),
+      ],
+    ),
+  );
+  return ok == true;
 }
 
 /// Round channel logo — cloud poster image with a letter fallback.
