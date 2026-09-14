@@ -88,19 +88,34 @@ class SectionTitle extends StatelessWidget {
   }
 }
 
+/// Frosted-glass style card — translucent gradient surface, hairline border,
+/// soft shadow. Fully adaptive: light gradient in light mode, dark in dark mode.
 class GlassCard extends StatelessWidget {
   final Widget child;
   final EdgeInsets padding;
   final VoidCallback? onTap;
-  const GlassCard({super.key, required this.child, this.padding = const EdgeInsets.all(14), this.onTap});
+  final double radius;
+  const GlassCard({super.key, required this.child, this.padding = const EdgeInsets.all(14), this.onTap, this.radius = 18});
   @override
   Widget build(BuildContext context) {
+    final dark = Theme.of(context).brightness == Brightness.dark;
+    final hc = HomeColors.of(context);
     final card = Container(
       padding: padding,
       decoration: BoxDecoration(
-        color: const Color(0xFFF0F9FF),
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: const Color(0xFFE0F2FE)),
+        borderRadius: BorderRadius.circular(radius),
+        border: Border.all(color: hc.line),
+        gradient: LinearGradient(
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+          colors: [
+            (dark ? const Color(0xFF2C2C2E) : Colors.white).withValues(alpha: 0.92),
+            (dark ? const Color(0xFF1C1C1E) : const Color(0xFFF7FAFF)).withValues(alpha: 0.78),
+          ],
+        ),
+        boxShadow: [
+          BoxShadow(color: Colors.black.withValues(alpha: dark ? 0.35 : 0.06), blurRadius: 16, offset: const Offset(0, 6)),
+        ],
       ),
       child: child,
     );

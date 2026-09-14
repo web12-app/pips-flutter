@@ -46,7 +46,7 @@ class _PhotosPageState extends State<PhotosPage> {
   Widget _segmented() => Container(
         margin: const EdgeInsets.symmetric(horizontal: 16),
         padding: const EdgeInsets.all(4),
-        decoration: BoxDecoration(color: const Color(0xFFEFF3F8), borderRadius: BorderRadius.circular(14)),
+        decoration: BoxDecoration(color: HomeColors.of(context).surfaceSoft, borderRadius: BorderRadius.circular(14)),
         child: Row(children: [
           _seg('Album', Icons.grid_view_rounded, albumMode, () => setState(() => albumMode = true)),
           const SizedBox(width: 4),
@@ -130,7 +130,7 @@ class _AlbumCard extends StatelessWidget {
     return GestureDetector(
       onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => AlbumDetailPage(album: name, items: items))),
       child: Container(
-        decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(18), border: Border.all(color: const Color(0xFFE8EEF6))),
+        decoration: BoxDecoration(color: HomeColors.of(context).surfaceSoft, borderRadius: BorderRadius.circular(18), border: Border.all(color: HomeColors.of(context).line)),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [

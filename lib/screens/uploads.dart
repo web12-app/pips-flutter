@@ -7,6 +7,7 @@ import '../api.dart';
 import '../models.dart';
 import '../services/notifications.dart';
 import '../widgets.dart';
+import '../widgets.dart';
 
 class UploadQueue extends ChangeNotifier {
   static final instance = UploadQueue._();
@@ -105,7 +106,7 @@ Widget importCard(BuildContext context, ServerImport im, {VoidCallback? onRemove
   return Container(
     margin: const EdgeInsets.only(top: 8),
     padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-    decoration: BoxDecoration(color: const Color(0xFFF8FAFC), borderRadius: BorderRadius.circular(13), border: Border.all(color: const Color(0xFFE8EEF6))),
+    decoration: BoxDecoration(color: HomeColors.of(context).surfaceSoft, borderRadius: BorderRadius.circular(13), border: Border.all(color: HomeColors.of(context).line)),
     child: Row(children: [
       IconTile(icon: icon, bg: color.withValues(alpha: 0.14), fg: color, size: 36),
       const SizedBox(width: 10),
@@ -239,7 +240,7 @@ class UploadsPage extends StatelessWidget {
     return Container(
       margin: const EdgeInsets.only(top: 10),
       padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(16), border: Border.all(color: const Color(0xFFE8EEF6))),
+      decoration: BoxDecoration(color: HomeColors.of(context).surfaceSoft, borderRadius: BorderRadius.circular(16), border: Border.all(color: HomeColors.of(context).line)),
       child: Column(children: [
         Row(children: [
           const IconTile(icon: Icons.upload_file, bg: Color(0xFFDBEAFE), fg: AppTheme.blue, size: 38),
@@ -539,7 +540,7 @@ class _UploadSheetState extends State<UploadSheet> {
     return Container(
       margin: const EdgeInsets.only(top: 8),
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-      decoration: BoxDecoration(color: const Color(0xFFF8FAFC), borderRadius: BorderRadius.circular(13), border: Border.all(color: const Color(0xFFE8EEF6))),
+      decoration: BoxDecoration(color: HomeColors.of(context).surfaceSoft, borderRadius: BorderRadius.circular(13), border: Border.all(color: HomeColors.of(context).line)),
       child: Row(children: [
         IconTile(icon: icon, bg: color.withValues(alpha: 0.14), fg: color, size: 36),
         const SizedBox(width: 10),
@@ -594,7 +595,7 @@ class _UploadSheetState extends State<UploadSheet> {
                       return Container(
                         margin: const EdgeInsets.only(top: 8),
                         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-                        decoration: BoxDecoration(color: const Color(0xFFF8FAFC), borderRadius: BorderRadius.circular(13), border: Border.all(color: const Color(0xFFE8EEF6))),
+                        decoration: BoxDecoration(color: HomeColors.of(context).surfaceSoft, borderRadius: BorderRadius.circular(13), border: Border.all(color: HomeColors.of(context).line)),
                         child: Column(children: [
                           Row(children: [
                             IconTile(icon: icon, bg: ic.withValues(alpha: 0.14), fg: ic, size: 34),
