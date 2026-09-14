@@ -55,6 +55,8 @@ class UploadQueue extends ChangeNotifier {
             im
               ..status = 'done'
               ..size = int.tryParse('${f['size'] ?? 0}') ?? im.size;
+            final n = (f['name'] ?? '').toString();
+            if (n.isNotEmpty) im.name = n; // worker renames to the video title
             changed = true;
           } else if (st == 'failed') {
             final msg = f['import_error'];
@@ -78,14 +80,16 @@ class UploadQueue extends ChangeNotifier {
 
 /// A server-side URL import queued on the Pips backend — the backend worker
 /// fetches the file from the source URL, so the import keeps running even if
-/// the app is closed or the phone goes offline.
+/// the app is closed or the phone goes offline. kind: 'url' (any file URL) or
+/// 'youtube' (yt-dlp download at best quality, filed in its own title folder).
 class ServerImport {
   final String id;
-  final String name;
+  final String kind;
+  String name;
   int size;
   String status; // importing | done | failed
   String? error;
-  ServerImport({required this.id, required this.name, required this.size, required this.status, this.error});
+  ServerImport({required this.id, required this.name, required this.size, required this.status, this.error, this.kind = 'url'});
   bool get active => status == 'importing';
 }
 
@@ -95,7 +99,7 @@ Widget importCard(BuildContext context, ServerImport im, {VoidCallback? onRemove
   final tone = im.status == 'failed' ? AppTheme.red : (im.status == 'done' ? AppTheme.green : AppTheme.blue);
   final sub = [
     if (im.size > 0) fmtBytes(im.size),
-    'from URL',
+    im.kind == 'youtube' ? 'YouTube · best quality' : 'from URL',
     im.status == 'importing'
         ? 'Importing on Pips cloud…'
         : im.status == 'done'
@@ -286,6 +290,12 @@ class _UploadSheetState extends State<UploadSheet> {
   bool busy = false;
   bool started = false; // after Upload -> live progress view
 
+  @override
+  void initState() {
+    super.initState();
+    urlCtrl.addListener(() { if (mounted) setState(() {}); });
+  }
+
   static const _mimes = {'pdf': 'application/pdf', 'png': 'image/png', 'jpg': 'image/jpeg', 'jpeg': 'image/jpeg', 'gif': 'image/gif', 'webp': 'image/webp', 'heic': 'image/heic', 'heif': 'image/heif', 'avif': 'image/avif', 'mp4': 'video/mp4', 'mov': 'video/quicktime', 'mkv': 'video/x-matroska', 'avi': 'video/x-msvideo', 'webm': 'video/webm', 'm4v': 'video/x-m4v', 'flv': 'video/x-flv', '3gp': 'video/3gpp', 'mpg': 'video/mpeg', 'mpeg': 'video/mpeg', 'wmv': 'video/x-ms-wmv', 'm3u8': 'application/vnd.apple.mpegurl', 'm3u': 'application/vnd.apple.mpegurl', 'mp3': 'audio/mpeg', 'wav': 'audio/wav', 'm4a': 'audio/mp4', 'zip': 'application/zip', 'rar': 'application/vnd.rar', '7z': 'application/x-7z-compressed', 'txt': 'text/plain', 'json': 'application/json', 'csv': 'text/csv', 'doc': 'application/msword', 'docx': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document', 'xls': 'application/vnd.ms-excel', 'xlsx': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'};
 
   static (IconData, Color) iconFor(String name) {
@@ -329,6 +339,18 @@ class _UploadSheetState extends State<UploadSheet> {
     } catch (_) {}
   }
 
+  /// True for single-video YouTube links (watch / shorts / embed / live / youtu.be).
+  static bool isYouTube(String raw) {
+    final u = Uri.tryParse(raw);
+    if (u == null) return false;
+    final h = u.host.toLowerCase();
+    final isYt = h == 'youtube.com' || h.endsWith('.youtube.com') || h == 'youtu.be' || h.endsWith('.youtu.be');
+    if (!isYt) return false;
+    if (h == 'youtu.be') return u.pathSegments.isNotEmpty;
+    final p = u.path;
+    return p.startsWith('/watch') || p.startsWith('/shorts/') || p.startsWith('/embed/') || p.startsWith('/live/');
+  }
+
   Future<void> importUrl() async {
     var raw = urlCtrl.text.trim();
     if (raw.isEmpty) return;
@@ -338,10 +360,13 @@ class _UploadSheetState extends State<UploadSheet> {
       toast(context, 'Enter a valid URL.');
       return;
     }
+    final isYt = isYouTube(raw);
     setState(() => busy = true);
     try {
-      // Server-side import: the backend fetches the URL in the background and
-      // stores the file in Pips cloud — the phone can go offline right away.
+      // Server-side import: the backend worker fetches the source in the
+      // background and stores the file in Pips cloud — for a YouTube link it
+      // downloads the video at best quality (video + audio in one mp4) into a
+      // folder named after the video. The phone can go offline right away.
       final entry = await PipsApi.importUrl(raw, vis: vis);
       if (!mounted) return;
       final st = entry['import_status'];
@@ -351,9 +376,12 @@ class _UploadSheetState extends State<UploadSheet> {
         size: int.tryParse('${entry['size'] ?? 0}') ?? 0,
         status: st is String && st.isNotEmpty ? st : 'importing',
         error: entry['import_error'] is String ? entry['import_error'] as String : null,
+        kind: isYt ? 'youtube' : 'url',
       ));
       setState(() => urlCtrl.clear());
-      toast(context, 'Import queued on the server — safe to close the app.');
+      toast(context, isYt
+          ? 'YouTube download queued — best quality, in its own folder. Safe to close the app.'
+          : 'Import queued on the server — safe to close the app.');
     } on ApiException catch (e) {
       if (mounted) toast(context, e.message);
     } catch (_) {
@@ -418,17 +446,20 @@ class _UploadSheetState extends State<UploadSheet> {
               Expanded(child: Divider(color: Color(0xFFE2E8F0))),
             ]),
             const SizedBox(height: 14),
-            const Text('Import from URL', style: TextStyle(fontWeight: FontWeight.w700, fontSize: 13.5)),
+            const Text('Import YouTube video or file URL', style: TextStyle(fontWeight: FontWeight.w700, fontSize: 13.5)),
             const SizedBox(height: 8),
             TextField(
               controller: urlCtrl,
               keyboardType: TextInputType.url,
               decoration: InputDecoration(
-                hintText: 'www.example.com/file.pdf',
+                hintText: 'youtube.com/watch?v=… or www.example.com/file.pdf',
                 prefixIcon: const Icon(Icons.link, size: 19),
                 suffixIcon: TextButton(
                   onPressed: busy ? null : importUrl,
-                  child: const Text('Select', style: TextStyle(fontWeight: FontWeight.w700, color: AppTheme.blue)),
+                  child: Text(
+                    _UploadSheetState.isYouTube(urlCtrl.text.trim()) ? 'Import video' : 'Select',
+                    style: const TextStyle(fontWeight: FontWeight.w700, color: AppTheme.blue),
+                  ),
                 ),
                 filled: true,
                 fillColor: Colors.white,
@@ -437,6 +468,24 @@ class _UploadSheetState extends State<UploadSheet> {
                 border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: const BorderSide(color: AppTheme.blue, width: 1.4)),
               ),
             ),
+            if (_UploadSheetState.isYouTube(urlCtrl.text.trim()))
+              Container(
+                margin: const EdgeInsets.only(top: 8),
+                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                decoration: BoxDecoration(
+                  color: AppTheme.blue.withValues(alpha: 0.08),
+                  borderRadius: BorderRadius.circular(10),
+                  border: Border.all(color: AppTheme.blue.withValues(alpha: 0.25)),
+                ),
+                child: const Row(children: [
+                  Icon(Icons.smart_display, size: 15, color: AppTheme.blue),
+                  SizedBox(width: 8),
+                  Expanded(child: Text(
+                    'YouTube: best quality, video + audio in one file, saved in a folder named after the video. Runs in the background — you can close the app.',
+                    style: TextStyle(fontSize: 11, height: 1.25),
+                  )),
+                ]),
+              ),
             const SizedBox(height: 14),
             Row(children: [
               Expanded(child: OutlinedButton.icon(
