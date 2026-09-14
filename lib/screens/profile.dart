@@ -117,7 +117,7 @@ class ProfilePage extends StatelessWidget {
               ),
               const SizedBox(height: 10),
               Text(user.isEmpty ? 'Account' : '@$user', style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 18)),
-              if (email.isNotEmpty) Text(email, style: const TextStyle(color: Colors.grey, fontSize: 13)),
+              if (email.isNotEmpty) Text(email, style: TextStyle(color: HomeColors.of(context).text2, fontSize: 13)),
             ]);
           },
         ),
@@ -252,7 +252,7 @@ class ProfilePage extends StatelessWidget {
                       ),
                     ]),
                     const SizedBox(height: 3),
-                    Text('${fmtBytes(used)} of ${fmtBytes(quota)} used · $files files', style: const TextStyle(fontSize: 11.5, color: Colors.grey)),
+                    Text('${fmtBytes(used)} of ${fmtBytes(quota)} used · $files files', style: TextStyle(fontSize: 11.5, color: HomeColors.of(context).text2)),
                     const SizedBox(height: 8),
                     ProgressBar(value: quota > 0 ? used / quota : 0),
                   ]),

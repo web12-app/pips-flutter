@@ -132,7 +132,7 @@ class _OverviewPageState extends State<OverviewPage> {
               const Expanded(child: Text('Videos for you', style: TextStyle(fontWeight: FontWeight.w800, fontSize: 16))),
               GestureDetector(
                 onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const ChannelsPage(initialTab: 1))),
-                child: Text('Discover', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700, color: Colors.grey.shade600)),
+                child: Text('Discover', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700, color: HomeColors.of(context).text2)),
               ),
             ]),
             const SizedBox(height: 8),
@@ -185,7 +185,7 @@ class _OverviewPageState extends State<OverviewPage> {
               child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
                 Text(it.title, maxLines: 2, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 14.5, fontWeight: FontWeight.w700, height: 1.25)),
                 const SizedBox(height: 3),
-                Text('${it.channelName.isNotEmpty ? it.channelName : '@${it.channelOwner}'} · ${fmtDate(it.addedAt)}', maxLines: 1, overflow: TextOverflow.ellipsis, style: TextStyle(fontSize: 12, color: Colors.grey.shade600)),
+                Text('${it.channelName.isNotEmpty ? it.channelName : '@${it.channelOwner}'} · ${fmtDate(it.addedAt)}', maxLines: 1, overflow: TextOverflow.ellipsis, style: TextStyle(fontSize: 12, color: HomeColors.of(context).text2)),
               ]),
             ),
           ]),

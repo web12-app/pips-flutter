@@ -155,13 +155,14 @@ class SheetTile extends StatelessWidget {
   final Color color;
   final String label;
   final VoidCallback onTap;
-  const SheetTile({super.key, required this.icon, required this.color, required this.label, required this.onTap});
+  final Widget? trailing;
+  const SheetTile({super.key, required this.icon, required this.color, required this.label, required this.onTap, this.trailing});
   @override
   Widget build(BuildContext context) => ListTile(
         dense: true,
         leading: IconTile(icon: icon, bg: color.withValues(alpha: 0.14), fg: color, size: 36),
         title: Text(label, style: const TextStyle(fontSize: 14.5, fontWeight: FontWeight.w600)),
-        trailing: const Icon(Icons.chevron_right, color: Colors.grey),
+        trailing: trailing ?? const Icon(Icons.chevron_right, color: Colors.grey),
         onTap: onTap,
       );
 }

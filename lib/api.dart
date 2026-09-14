@@ -357,6 +357,27 @@ class PipsApi {
   static Future<Map<String, dynamic>> channelAddFile(String cid, String fileId, [String title = '', String description = '']) =>
       _req('POST', '$api/channels/${enc(cid)}/files', {'file_id': fileId, 'title': title, 'description': description});
   static Future<void> channelRemoveFile(String cid, String fileId) => _req('DELETE', '$api/channels/${enc(cid)}/files/${enc(fileId)}');
+  static Future<Map<String, dynamic>> channelPatchFile(String cid, String fileId, Map<String, dynamic> changes) =>
+      _req('PATCH', '$api/channels/${enc(cid)}/files/${enc(fileId)}', changes);
+
+  /// Watch history of a channel video (who + when) — owner only.
+  static Future<List<dynamic>> channelFileViews(String cid, String fileId) async {
+    final r = await _req('GET', '$api/channels/${enc(cid)}/files/${enc(fileId)}/views');
+    return r['views'] is List ? r['views'] : [];
+  }
+
+  // ---------------------------------------------------------------- comments
+  static Future<List<dynamic>> channelComments(String fileId) async {
+    final r = await _req('GET', '$api/channels/files/${enc(fileId)}/comments');
+    return r['comments'] is List ? r['comments'] : [];
+  }
+
+  static Future<Map<String, dynamic>> channelAddComment(String fileId, String text) =>
+      _req('POST', '$api/channels/files/${enc(fileId)}/comments', {'text': text});
+
+  /// Toggle a like/dislike on a comment. vote = 'like' | 'dislike'.
+  static Future<Map<String, dynamic>> channelVoteComment(String fileId, String mid, String vote) =>
+      _req('POST', '$api/channels/files/${enc(fileId)}/comments/${enc(mid)}/vote', {'vote': vote});
   static Future<List<dynamic>> channelSearchFiles(String cid, String q) async {
     final r = await _req('GET', '$api/channels/${enc(cid)}/search?q=${enc(q)}');
     return r['files'] is List ? r['files'] : [];

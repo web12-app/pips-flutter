@@ -24,6 +24,7 @@ class ChanItem {
   final String addedAt;
   final String channelId, channelName, channelOwner;
   final String? channelLogoId;
+  final bool locked;
   ChanItem({
     required this.e,
     required this.title,
@@ -32,6 +33,7 @@ class ChanItem {
     this.channelName = '',
     this.channelOwner = '',
     this.channelLogoId,
+    this.locked = false,
   });
 
   factory ChanItem.fromRaw(Map<String, dynamic> f) {
@@ -47,6 +49,7 @@ class ChanItem {
       channelName: (f['channel_name'] ?? '').toString(),
       channelOwner: (f['owner'] ?? '').toString(),
       channelLogoId: logo.isEmpty ? null : logo,
+      locked: f['locked'] == true,
     );
   }
 }
@@ -461,6 +464,7 @@ class _ChannelVideoPageState extends State<ChannelVideoPage> with WidgetsBinding
           ]),
         ),
       ),
+      _CommentsSection(fileId: cur.id),
       const Padding(padding: EdgeInsets.fromLTRB(16, 10, 16, 4), child: Text('Up next', style: TextStyle(fontWeight: FontWeight.w800, fontSize: 15))),
       if (related.isEmpty)
         Padding(
@@ -708,6 +712,229 @@ class _ChannelVideoPageState extends State<ChannelVideoPage> with WidgetsBinding
         }
       },
       child: child,
+    );
+  }
+}
+
+// =================================================================== comments
+String _whenOf(String at) {
+  try {
+    final d = DateTime.parse(at).toLocal();
+    final now = DateTime.now();
+    final diff = now.difference(d);
+    String hms(DateTime x) {
+      final h = x.hour == 0 ? 12 : x.hour > 12 ? x.hour - 12 : x.hour;
+      return '${h}:${x.minute.toString().padLeft(2, '0')} ${x.hour >= 12 ? 'PM' : 'AM'}';
+    }
+    const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+    if (diff.inMinutes < 1) return 'just now';
+    if (diff.inMinutes < 60) return '${diff.inMinutes} min ago';
+    if (d.year == now.year && d.month == now.month && d.day == now.day) return hms(d);
+    if (diff.inDays == 1) return 'yesterday';
+    return '${months[d.month - 1]} ${d.day}';
+  } catch (_) {
+    return at;
+  }
+}
+
+/// YouTube-style comments block under the video: add a comment, like/dislike
+/// each one, and a "More" button when there are more than the first page.
+class _CommentsSection extends StatefulWidget {
+  final String fileId;
+  const _CommentsSection({required this.fileId});
+  @override
+  State<_CommentsSection> createState() => _CommentsSectionState();
+}
+
+class _CommentsSectionState extends State<_CommentsSection> {
+  Key refresh = UniqueKey();
+  final ctrl = TextEditingController();
+  bool sending = false;
+  int visible = 20;
+
+  @override
+  void dispose() {
+    ctrl.dispose();
+    super.dispose();
+  }
+
+  Future<void> post() async {
+    final text = ctrl.text.trim();
+    if (text.isEmpty || sending) return;
+    if (PipsApi.username == null || PipsApi.username!.isEmpty) {
+      toast(context, 'Login to join the conversation.');
+      return;
+    }
+    setState(() => sending = true);
+    try {
+      await PipsApi.channelAddComment(widget.fileId, text);
+      ctrl.clear();
+      setState(() => refresh = UniqueKey());
+    } on ApiException catch (e) {
+      if (mounted) toast(context, e.message);
+    }
+    if (mounted) setState(() => sending = false);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final hc = HomeColors.of(context);
+    return FutureBuilder<List<dynamic>>(
+      key: refresh,
+      future: PipsApi.channelComments(widget.fileId).catchError((_) => <dynamic>[]),
+      builder: (_, s) {
+        if (s.connectionState != ConnectionState.done) return const SizedBox.shrink();
+        final comments = (s.data ?? []).take(visible).toList();
+        final total = s.data?.length ?? 0;
+        return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
+            child: Text('$total comment${total == 1 ? '' : 's'}', style: TextStyle(fontWeight: FontWeight.w800, fontSize: 15, color: hc.text1)),
+          ),
+          // add-a-comment row
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 16),
+            child: Row(children: [
+              AvatarTile(username: PipsApi.username ?? '?', radius: 16),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 4),
+                  decoration: BoxDecoration(
+                    color: hc.surfaceSoft,
+                    borderRadius: BorderRadius.circular(22),
+                    border: Border.all(color: hc.line),
+                  ),
+                  child: Row(children: [
+                    Expanded(
+                      child: TextField(
+                        controller: ctrl,
+                        onSubmitted: (_) => post(),
+                        decoration: InputDecoration(border: InputBorder.none, hintText: 'Add a comment…', isDense: true, contentPadding: const EdgeInsets.symmetric(vertical: 10)),
+                      ),
+                    ),
+                    IconButton(
+                      icon: sending
+                          ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2))
+                          : const Icon(Icons.send, size: 18, color: AppTheme.blue),
+                      onPressed: sending ? null : post,
+                    ),
+                  ]),
+                ),
+              ),
+            ]),
+          ),
+          const SizedBox(height: 6),
+          if (comments.isEmpty)
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+              child: Text('No comments yet — be the first.', style: TextStyle(fontSize: 12.5, color: hc.text2)),
+            )
+          else
+            for (final raw in comments) _CommentRow(m: Map<String, dynamic>.from(raw as Map), onVote: (mid, vote) async {
+              try {
+                await PipsApi.channelVoteComment(widget.fileId, mid, vote);
+                if (mounted) setState(() => refresh = UniqueKey());
+              } on ApiException catch (e) {
+                if (mounted) toast(context, e.message);
+              }
+            }),
+          if (total > visible)
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+              child: TextButton(
+                onPressed: () => setState(() => visible += 20),
+                child: Text('More (${total - visible} more comments)', style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 12.5, color: AppTheme.blue)),
+              ),
+            ),
+        ]);
+      },
+    );
+  }
+}
+
+/// One comment: avatar, user, time, text (expandable with "more"), like/dislike.
+class _CommentRow extends StatefulWidget {
+  final Map<String, dynamic> m;
+  final Future<void> Function(String mid, String vote) onVote;
+  const _CommentRow({required this.m, required this.onVote});
+  @override
+  State<_CommentRow> createState() => _CommentRowState();
+}
+
+class _CommentRowState extends State<_CommentRow> {
+  bool expanded = false;
+  static const _longLen = 160;
+
+  @override
+  Widget build(BuildContext context) {
+    final hc = HomeColors.of(context);
+    final m = widget.m;
+    final user = (m['user'] ?? '').toString();
+    final text = (m['text'] ?? '').toString();
+    final likes = m['likes'] is num ? (m['likes'] as num).toInt() : 0;
+    final dislikes = m['dislikes'] is num ? (m['dislikes'] as num).toInt() : 0;
+    final myVote = (m['my_vote'] ?? '').toString();
+    final long = text.length > _longLen && !expanded;
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 8, 16, 2),
+      child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        AvatarTile(username: user, radius: 16),
+        const SizedBox(width: 10),
+        Expanded(
+          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Row(children: [
+              Text(user.isEmpty ? 'guest' : '@$user', style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 12.5)),
+              const SizedBox(width: 8),
+              Text(_whenOf(m['at']?.toString() ?? ''), style: TextStyle(fontSize: 11, color: hc.text2)),
+            ]),
+            Padding(
+              padding: const EdgeInsets.only(top: 2),
+              child: Text(
+                long ? '${text.substring(0, _longLen)}…' : text,
+                style: TextStyle(fontSize: 13, color: hc.text1, height: 1.35),
+              ),
+            ),
+            if (text.length > _longLen)
+              Align(
+                alignment: Alignment.centerLeft,
+                child: TextButton(
+                  onPressed: () => setState(() => expanded = !expanded),
+                  child: Text(expanded ? 'less' : 'more', style: TextStyle(fontSize: 11.5, fontWeight: FontWeight.w800, color: AppTheme.blue)),
+                ),
+              ),
+            Padding(
+              padding: const EdgeInsets.only(top: 3),
+              child: Row(children: [
+                GestureDetector(
+                  behavior: HitTestBehavior.opaque,
+                  onTap: () => widget.onVote((m['id'] ?? '').toString(), 'like'),
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                    child: Row(mainAxisSize: MainAxisSize.min, children: [
+                      Icon(Icons.thumb_up_outlined, size: 16, color: myVote == 'like' ? AppTheme.blue : hc.text2),
+                      const SizedBox(width: 4),
+                      Text('$likes', style: TextStyle(fontSize: 11.5, fontWeight: FontWeight.w700, color: myVote == 'like' ? AppTheme.blue : hc.text2)),
+                    ]),
+                  ),
+                ),
+                GestureDetector(
+                  behavior: HitTestBehavior.opaque,
+                  onTap: () => widget.onVote((m['id'] ?? '').toString(), 'dislike'),
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                    child: Row(mainAxisSize: MainAxisSize.min, children: [
+                      Icon(Icons.thumb_down_outlined, size: 16, color: myVote == 'dislike' ? AppTheme.red : hc.text2),
+                      const SizedBox(width: 4),
+                      Text('$dislikes', style: TextStyle(fontSize: 11.5, fontWeight: FontWeight.w700, color: myVote == 'dislike' ? AppTheme.red : hc.text2)),
+                    ]),
+                  ),
+                ),
+              ]),
+            ),
+          ]),
+        ),
+      ]),
     );
   }
 }

@@ -282,15 +282,47 @@ class _ChannelPageState extends State<ChannelPage> {
     return ListTile(
       contentPadding: const EdgeInsets.symmetric(horizontal: 12),
       leading: video
-          ? Container(
-              width: 104, height: 58,
-              decoration: BoxDecoration(color: const Color(0xFF16181D), borderRadius: BorderRadius.circular(10)),
-              child: const Icon(Icons.play_arrow_rounded, color: Colors.white70, size: 32),
-            )
+          ? Stack(children: [
+              Container(
+                width: 104, height: 58,
+                decoration: BoxDecoration(color: const Color(0xFF16181D), borderRadius: BorderRadius.circular(10)),
+                child: const Icon(Icons.play_arrow_rounded, color: Colors.white70, size: 32),
+              ),
+              if (it.locked)
+                Positioned(right: 4, bottom: 4, child: Container(padding: const EdgeInsets.all(3), decoration: BoxDecoration(color: Colors.black.withValues(alpha: 0.7), borderRadius: BorderRadius.circular(6)), child: const Icon(Icons.lock, size: 12, color: Colors.white))),
+            ])
           : IconTile(icon: m.icon, bg: m.bg, fg: m.fg, size: 46),
       title: Text(it.title, maxLines: 2, overflow: TextOverflow.ellipsis, style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 14)),
-      subtitle: Text('${fmtBytes(e.size)}${it.addedAt.isNotEmpty ? ' · ${fmtDate(it.addedAt)}' : ''}', style: const TextStyle(fontSize: 11.5)),
-      trailing: mine ? IconButton(icon: const Icon(Icons.remove_circle_outline, color: AppTheme.red, size: 20), onPressed: () => _remove(e.id)) : null,
+      subtitle: Text('${it.locked ? '🔒 Locked · ' : ''}${fmtBytes(e.size)}${it.addedAt.isNotEmpty ? ' · ${fmtDate(it.addedAt)}' : ''}', style: const TextStyle(fontSize: 11.5)),
+      trailing: mine
+          ? IconButton(
+              tooltip: 'Video options',
+              icon: const Icon(Icons.more_vert, size: 22),
+              onPressed: () => showSheet(context, VideoOptionsSheet(
+                cid: widget.id,
+                fileId: e.id,
+                title: it.title,
+                locked: it.locked,
+                onPlay: () {
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (_) => ChannelVideoPage(
+                        video: e,
+                        videoTitle: it.title,
+                        channelId: widget.id,
+                        channelName: name,
+                        channelOwner: owner,
+                        channelLogoId: posterId,
+                        related: items,
+                      ),
+                    ),
+                  ).then((_) { if (mounted) setState(() => refresh = UniqueKey()); });
+                },
+                onChanged: () { if (mounted) setState(() => refresh = UniqueKey()); },
+              )),
+            )
+          : null,
       onTap: () {
         if (!video) {
           showFileSheet(context, e, () => setState(() => refresh = UniqueKey()));
@@ -320,12 +352,6 @@ class _ChannelPageState extends State<ChannelPage> {
     });
   }
 
-  Future<void> _remove(String fileId) async {
-    try {
-      await PipsApi.channelRemoveFile(widget.id, fileId);
-      setState(() => refresh = UniqueKey());
-    } on ApiException catch (e) { if (mounted) toast(context, e.message); }
-  }
 
   Future<void> _delete() async {
     final ok = await showDialog<bool>(context: context, builder: (ctx) => AlertDialog(title: Text('Delete "${widget.name}"?'), actions: [TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')), FilledButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('Delete'))]));
@@ -599,4 +625,177 @@ class _ChannelSettingsPageState extends State<ChannelSettingsPage> {
           Center(child: Text('Deleting removes the channel for everyone — video files stay in your cloud.', textAlign: TextAlign.center, style: TextStyle(fontSize: 11.5, color: Colors.grey.shade600))),
         ]),
       );
+}
+
+// =================================================================== video options (admin)
+/// Bottom sheet opened from the 3-dot icon on a channel video (owner only):
+/// play, temporarily lock/unlock, watch history (who + when) and delete.
+class VideoOptionsSheet extends StatefulWidget {
+  final String cid, fileId, title;
+  final bool locked;
+  final VoidCallback onPlay;
+  final VoidCallback onChanged;
+  const VideoOptionsSheet({
+    super.key,
+    required this.cid,
+    required this.fileId,
+    required this.title,
+    required this.onPlay,
+    required this.onChanged,
+    this.locked = false,
+  });
+
+  @override
+  State<VideoOptionsSheet> createState() => _VideoOptionsSheetState();
+}
+
+class _VideoOptionsSheetState extends State<VideoOptionsSheet> {
+  bool busy = false;
+  bool showHistory = false;
+  List<dynamic>? history;
+  bool loadingHistory = false;
+
+  String _when(String at) {
+    try {
+      final d = DateTime.parse(at).toLocal();
+      final now = DateTime.now();
+      final diff = now.difference(d);
+      String hms(DateTime x) {
+        final h = x.hour == 0 ? 12 : x.hour > 12 ? x.hour - 12 : x.hour;
+        return '${h}:${x.minute.toString().padLeft(2, '0')} ${x.hour >= 12 ? 'PM' : 'AM'}';
+      }
+      const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+      if (diff.inMinutes < 1) return 'just now';
+      if (diff.inMinutes < 60) return '${diff.inMinutes} min ago';
+      if (d.year == now.year && d.month == now.month && d.day == now.day) return hms(d);
+      if (diff.inDays == 1) return 'yesterday ${hms(d)}';
+      return '${months[d.month - 1]} ${d.day}, ${hms(d)}';
+    } catch (_) {
+      return at;
+    }
+  }
+
+  Future<void> _toggleLock() async {
+    setState(() => busy = true);
+    try {
+      await PipsApi.channelPatchFile(widget.cid, widget.fileId, {'locked': !widget.locked});
+      toast(context, widget.locked ? 'Video unlocked' : 'Video temporarily locked — only you can play it.');
+      Navigator.pop(context);
+      widget.onChanged();
+    } on ApiException catch (e) {
+      if (mounted) toast(context, e.message);
+    }
+    if (mounted) setState(() => busy = false);
+  }
+
+  Future<void> _loadHistory() async {
+    setState(() => loadingHistory = true);
+    try {
+      history = await PipsApi.channelFileViews(widget.cid, widget.fileId);
+    } on ApiException catch (e) {
+      if (mounted) toast(context, e.message);
+    }
+    if (mounted) setState(() => loadingHistory = false);
+  }
+
+  Future<void> _delete() async {
+    final ok = await confirmDelete(context, title: 'Delete "${widget.title}"?', message: 'It is removed from this channel for everyone. The file stays in your cloud storage.', confirmLabel: 'Yes, delete');
+    if (!ok) return;
+    setState(() => busy = true);
+    try {
+      await PipsApi.channelRemoveFile(widget.cid, widget.fileId);
+      Navigator.pop(context);
+      toast(context, 'Video deleted from channel');
+      widget.onChanged();
+    } on ApiException catch (e) {
+      if (mounted) {
+        toast(context, e.message);
+        setState(() => busy = false);
+      }
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final hc = HomeColors.of(context);
+    return SafeArea(
+      child: Column(mainAxisSize: MainAxisSize.min, children: [
+        Padding(
+          padding: const EdgeInsets.fromLTRB(20, 16, 20, 6),
+          child: Row(children: [
+            const Icon(Icons.tune, size: 18, color: AppTheme.blue),
+            const SizedBox(width: 8),
+            const Text('Video options', style: TextStyle(fontWeight: FontWeight.w800, fontSize: 15)),
+            const Spacer(),
+            if (busy) const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2)),
+          ]),
+        ),
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 20),
+          child: Text(widget.title, maxLines: 2, overflow: TextOverflow.ellipsis, style: TextStyle(fontSize: 12.5, color: hc.text2)),
+        ),
+        const SizedBox(height: 6),
+        SheetTile(
+          icon: Icons.play_arrow_rounded,
+          color: AppTheme.blue,
+          label: 'Play video',
+          onTap: () {
+            Navigator.pop(context);
+            widget.onPlay();
+          },
+        ),
+        SheetTile(
+          icon: widget.locked ? Icons.lock_open : Icons.lock_outline,
+          color: AppTheme.orange,
+          label: widget.locked ? 'Unlock video' : 'Temporarily lock video',
+          trailing: widget.locked ? const Text('LOCKED', style: TextStyle(fontSize: 10, fontWeight: FontWeight.w800, color: AppTheme.orange)) : null,
+          onTap: _toggleLock,
+        ),
+        SheetTile(
+          icon: Icons.history,
+          color: AppTheme.purple,
+          label: showHistory ? 'Hide watch history' : 'Watch history (who + when)',
+          onTap: () async {
+            setState(() => showHistory = !showHistory);
+            if (showHistory && history == null) await _loadHistory();
+          },
+        ),
+        if (showHistory)
+          Padding(
+            padding: const EdgeInsets.fromLTRB(24, 2, 24, 8),
+            child: loadingHistory
+                ? const SizedBox(height: 30, child: Center(child: CircularProgressIndicator()))
+                : (history == null || history!.isEmpty)
+                    ? Text('No plays recorded yet.', style: TextStyle(fontSize: 12, color: hc.text2))
+                    : SizedBox(
+                        height: 190,
+                        child: ListView.builder(
+                          itemCount: history!.length,
+                          itemBuilder: (_, i) {
+                            final v = Map<String, dynamic>.from(history![i] as Map);
+                            final u = (v['user'] ?? '').toString();
+                            return Padding(
+                              padding: const EdgeInsets.symmetric(vertical: 3),
+                              child: Row(children: [
+                                AvatarTile(username: u, radius: 13),
+                                const SizedBox(width: 8),
+                                Expanded(child: Text(u.isEmpty ? 'guest' : '@$u', maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 12.5, fontWeight: FontWeight.w600))),
+                                Text(_when(v['at']?.toString() ?? ''), style: TextStyle(fontSize: 11, color: hc.text2)),
+                              ]),
+                            );
+                          },
+                        ),
+                      ),
+          ),
+        const Divider(height: 1),
+        SheetTile(
+          icon: Icons.delete_outline,
+          color: AppTheme.red,
+          label: 'Delete video from channel',
+          onTap: _delete,
+        ),
+        const SizedBox(height: 8),
+      ]),
+    );
+  }
 }
