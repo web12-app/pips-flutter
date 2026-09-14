@@ -7,7 +7,6 @@ import '../api.dart';
 import '../models.dart';
 import '../services/notifications.dart';
 import '../widgets.dart';
-import '../widgets.dart';
 
 class UploadQueue extends ChangeNotifier {
   static final instance = UploadQueue._();
