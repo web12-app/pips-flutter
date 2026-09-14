@@ -39,9 +39,9 @@ class _YtConnectPageState extends State<YtConnectPage> {
   Widget build(BuildContext context) {
     final hc = HomeColors.of(context);
     return Scaffold(
-      backgroundColor: hc.bg,
+      backgroundColor: hc.surface,
       appBar: AppBar(
-        backgroundColor: hc.bg,
+        backgroundColor: hc.surface,
         foregroundColor: hc.text1,
         elevation: 0,
         title: const Text('YouTube — sign in & connect', style: TextStyle(fontWeight: FontWeight.w700)),
