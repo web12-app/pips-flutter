@@ -7,6 +7,7 @@ import '../api.dart';
 import '../models.dart';
 import '../services/notifications.dart';
 import '../widgets.dart';
+import 'yt_connect_page.dart';
 
 class UploadQueue extends ChangeNotifier {
   static final instance = UploadQueue._();
@@ -477,13 +478,24 @@ class _UploadSheetState extends State<UploadSheet> {
                   borderRadius: BorderRadius.circular(10),
                   border: Border.all(color: AppTheme.blue.withValues(alpha: 0.25)),
                 ),
-                child: const Row(children: [
-                  Icon(Icons.smart_display, size: 15, color: AppTheme.blue),
-                  SizedBox(width: 8),
-                  Expanded(child: Text(
-                    'YouTube: best quality, video + audio in one file, saved in a folder named after the video. Runs in the background — you can close the app.',
-                    style: TextStyle(fontSize: 11, height: 1.25),
-                  )),
+                child: Column(children: [
+                  const Row(children: [
+                    Icon(Icons.smart_display, size: 15, color: AppTheme.blue),
+                    SizedBox(width: 8),
+                    Expanded(child: Text(
+                      'YouTube: best quality, video + audio in one file, saved in a folder named after the video. Runs in the background — you can close the app.',
+                      style: TextStyle(fontSize: 11, height: 1.25),
+                    )),
+                  ]),
+                  const SizedBox(height: 6),
+                  TextButton(
+                    onPressed: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const YtConnectPage())),
+                    child: const Row(mainAxisSize: MainAxisSize.min, children: [
+                      Icon(Icons.smart_toy, size: 14, color: AppTheme.blue),
+                      SizedBox(width: 5),
+                      Text('Connect YouTube on this phone (auto cookies)', style: TextStyle(fontWeight: FontWeight.w700, fontSize: 12, color: AppTheme.blue)),
+                    ]),
+                  ),
                 ]),
               ),
             const SizedBox(height: 14),

@@ -36,6 +36,21 @@ class MainActivity : FlutterActivity() {
                 else -> result.notImplemented()
             }
         }
+        // YouTube cookie bridge: reads the shared webview cookie jar so the app
+        // can collect a Netscape cookies.txt (for server-side YouTube imports).
+        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "pips/youtube").setMethodCallHandler { call, result ->
+            when (call.method) {
+                "cookieHeader" -> {
+                    val url = call.argument<String>("url") ?: "https://www.youtube.com"
+                    try {
+                        result.success(android.webkit.CookieManager.getInstance().getCookie(url) ?: "")
+                    } catch (e: Exception) {
+                        result.success("")
+                    }
+                }
+                else -> result.notImplemented()
+            }
+        }
     }
 
     /** Enter PiP mode. Returns false when the device can't (API < 26). */

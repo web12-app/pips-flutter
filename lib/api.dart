@@ -244,6 +244,13 @@ class PipsApi {
   static Future<Map<String, dynamic>> importUrl(String url, {String vis = 'public'}) =>
       _req('POST', '$api/v1/files/import-url', {'url': url, 'visibility': vis});
 
+  /// Owner: save YouTube cookies (Netscape cookies.txt) collected on the phone.
+  static Future<Map<String, dynamic>> saveYtCookies(String cookies) =>
+      _req('POST', '$api/yt/cookies', {'cookies': cookies});
+
+  /// Owner: are YouTube cookies connected on the server?
+  static Future<Map<String, dynamic>> ytCookiesStatus() => _req('GET', '$api/yt/cookies/status');
+
   /// Full metadata for one file (includes import_status while importing).
   static Future<Map<String, dynamic>> fileInfo(String id) =>
       _req('GET', '$api/files/info?id=${enc(id)}');
