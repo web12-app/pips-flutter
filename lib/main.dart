@@ -172,27 +172,31 @@ class _MainShellState extends State<MainShell> {
 
   @override
   Widget build(BuildContext context) {
+    final hc = HomeColors.of(context);
     final selected = tab == 0 ? 0 : tab + 1; // map page index -> bar slot (skip center)
     return Scaffold(
       body: IndexedStack(index: tab, children: _pages),
       bottomNavigationBar: SafeArea(
         top: false,
         child: Container(
-          margin: const EdgeInsets.fromLTRB(16, 4, 16, 10),
-          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+          margin: const EdgeInsets.fromLTRB(14, 0, 14, 10),
+          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 10),
           decoration: BoxDecoration(
-            color: const Color(0xFF16181D),
-            borderRadius: BorderRadius.circular(30),
-            boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.18), blurRadius: 18, offset: const Offset(0, 6))],
+            color: hc.surface,
+            borderRadius: BorderRadius.circular(32),
+            border: Border.all(color: hc.line),
+            boxShadow: [
+              BoxShadow(color: Colors.black.withValues(alpha: 0.10), blurRadius: 20, offset: const Offset(0, 6)),
+            ],
           ),
           child: Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            mainAxisAlignment: MainAxisAlignment.spaceEvenly,
             children: [
-              _item(0, Icons.home_rounded, selected == 0),
-              _item(1, Icons.folder_copy_outlined, selected == 1),
+              _item(0, 'Home', Icons.home_outlined, Icons.home_rounded, selected == 0),
+              _item(1, 'Files', Icons.folder_outlined, Icons.folder_rounded, selected == 1),
               _centerButton(),
-              _item(3, Icons.photo_library_outlined, selected == 3),
-              _item(4, Icons.person_outline, selected == 4),
+              _item(3, 'Photos', Icons.photo_library_outlined, Icons.photo_library, selected == 3),
+              _item(4, 'Profile', Icons.person_outline, Icons.person_rounded, selected == 4),
             ],
           ),
         ),
@@ -200,27 +204,45 @@ class _MainShellState extends State<MainShell> {
     );
   }
 
-  Widget _item(int slot, IconData icon, bool active) => GestureDetector(
-        behavior: HitTestBehavior.opaque,
-        onTap: () => _onTap(slot),
-        child: AnimatedContainer(
-          duration: const Duration(milliseconds: 180),
-          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 9),
-          decoration: BoxDecoration(
-            color: active ? Colors.white.withValues(alpha: 0.14) : Colors.transparent,
-            borderRadius: BorderRadius.circular(22),
-          ),
-          child: Icon(icon, size: 23, color: active ? Colors.white : Colors.white54),
+  /// Icon + label tab — blue filled icon & blue label when active,
+  /// grey outlined icon & grey label otherwise (like the reference).
+  Widget _item(int slot, String label, IconData inactiveIcon, IconData activeIcon, bool active) {
+    final hc = HomeColors.of(context);
+    return GestureDetector(
+      behavior: HitTestBehavior.opaque,
+      onTap: () => _onTap(slot),
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 180),
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+        decoration: BoxDecoration(
+          color: active ? AppTheme.blueSoft : Colors.transparent,
+          borderRadius: BorderRadius.circular(20),
         ),
-      );
+        child: Column(mainAxisSize: MainAxisSize.min, children: [
+          Icon(active ? activeIcon : inactiveIcon, size: 24, color: active ? AppTheme.blue : hc.text2),
+          const SizedBox(height: 3),
+          Text(label, style: TextStyle(fontSize: 10.5, fontWeight: FontWeight.w700, color: active ? AppTheme.blue : hc.text2)),
+        ]),
+      ),
+    );
+  }
 
+  /// Raised blue circular + button in the middle (opens the upload sheet).
   Widget _centerButton() => GestureDetector(
         onTap: () => _onTap(2),
-        child: Container(
-          width: 46,
-          height: 46,
-          decoration: const BoxDecoration(color: AppTheme.blue, shape: BoxShape.circle),
-          child: const Icon(Icons.add, color: Colors.white, size: 26),
+        child: Transform.translate(
+          offset: const Offset(0, -8),
+          child: Container(
+            width: 52,
+            height: 52,
+            decoration: BoxDecoration(
+              color: AppTheme.blue,
+              shape: BoxShape.circle,
+              border: Border.all(color: HomeColors.of(context).surface, width: 3),
+              boxShadow: [BoxShadow(color: AppTheme.blue.withValues(alpha: 0.4), blurRadius: 14, offset: const Offset(0, 5))],
+            ),
+            child: const Icon(Icons.add, color: Colors.white, size: 30),
+          ),
         ),
       );
 }
