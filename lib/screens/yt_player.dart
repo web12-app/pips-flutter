@@ -729,7 +729,7 @@ class _ChannelVideoPageState extends State<ChannelVideoPage> with WidgetsBinding
                     visualDensity: VisualDensity.compact,
                     padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 9),
                     backgroundColor: subscribed ? (dark ? Colors.white24 : Colors.black26) : AppTheme.red,
-                    foregroundColor: subscribed ? (dark ? Colors.white : Colors.white) : Colors.white,
+                    foregroundColor: Colors.white,
                   ),
                   child: Text(subscribed ? 'Subscribed' : 'Subscribe', style: const TextStyle(fontSize: 12.5, fontWeight: FontWeight.w800)),
                 ),

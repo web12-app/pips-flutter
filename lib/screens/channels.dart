@@ -5,7 +5,7 @@ import 'dart:typed_data';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:path_provider/path_provider.dart';
-import 'package/video_player/video_player.dart';
+import 'package:video_player/video_player.dart';
 import 'package:video_thumbnail/video_thumbnail.dart';
 import '../api.dart';
 import '../models.dart';
@@ -635,6 +635,7 @@ class _AddVideoSheetState extends State<AddVideoSheet> {
       if (manual) {
         fid = manualId.text.trim();
         if (fid.isEmpty) throw ApiException('Enter a file ID first.', 0);
+        await PipsApi.channelAddFile(widget.cid, fid, title.text.trim());
       } else {
         final f = picked;
         if (f == null) throw ApiException('Choose a video first.', 0);
@@ -676,8 +677,6 @@ class _AddVideoSheetState extends State<AddVideoSheet> {
           }
         }
         await PipsApi.channelAddFile(widget.cid, fid, title.text.trim(), '', thumbId, durationMs);
-      } else {
-        await PipsApi.channelAddFile(widget.cid, fid, title.text.trim());
       }
       if (mounted) Navigator.pop(context, true);
     } on ApiException catch (e) {
