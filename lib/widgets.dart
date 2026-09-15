@@ -1,6 +1,7 @@
 import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'api.dart';
+import 'models.dart';
 
 class AppTheme {
   static const blue = Color(0xFF0B6EF0);
@@ -319,7 +320,7 @@ Future<Uint8List?> loadFileImage(String? id) async {
   if (hit != null) return Uint8List.fromList(hit);
   try {
     final b = await PipsApi.getBytes(PipsApi.viewUrl(id));
-    if (_fileImgCache.length > 80) _fileImgCache.clear();
+    if (_fileImgCache.length > 300) _fileImgCache.remove(_fileImgCache.keys.first);
     _fileImgCache[id] = b;
     return Uint8List.fromList(b);
   } catch (_) {
@@ -448,4 +449,79 @@ class ChannelAvatar extends StatelessWidget {
           );
         },
       );
+}
+
+/// "13:02" / "1:02:45" — video duration label (YouTube badge style).
+/// Returns '' when the duration is unknown.
+String fmtDurationMs(int ms) {
+  if (ms <= 0) return '';
+  final d = Duration(milliseconds: ms);
+  final h = d.inHours, m = d.inMinutes % 60, s = d.inSeconds % 60;
+  if (h > 0) return '$h:${m.toString().padLeft(2, '0')}:${s.toString().padLeft(2, '0')}';
+  return '$m:${s.toString().padLeft(2, '0')}';
+}
+
+/// 938 → "938", 1700 → "1.7K", 93000 → "93K", 1200000 → "1.2M" — YouTube
+/// style compact counters for views / likes / subscribers.
+String fmtCompact(int n) {
+  if (n >= 1000000) {
+    final v = n / 1000000;
+    return '${v.toStringAsFixed(v == v.roundToDouble() ? 0 : 1)}M';
+  }
+  if (n >= 1000) {
+    final v = n / 1000;
+    return '${v.toStringAsFixed(v == v.roundToDouble() ? 0 : 1)}K';
+  }
+  return '$n';
+}
+
+/// YouTube-style video thumbnail: cloud thumbnail image with a dark
+/// placeholder fallback, plus a duration badge (bottom-right) when known.
+/// Parent must give it a fixed size (AspectRatio / SizedBox).
+class VideoThumb extends StatelessWidget {
+  final String? thumbId;
+  final int durationMs;
+
+  /// Shown in the badge when no duration is known (e.g. non-video files).
+  final int? fallbackBytes;
+  final double radius;
+  const VideoThumb({super.key, this.thumbId, this.durationMs = 0, this.fallbackBytes, this.radius = 12});
+
+  String? get _badge {
+    if (durationMs > 0) return fmtDurationMs(durationMs);
+    if (fallbackBytes != null && fallbackBytes! > 0) return fmtBytes(fallbackBytes!);
+    return null;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final hasThumb = thumbId != null && thumbId!.isNotEmpty;
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(radius),
+      child: Stack(fit: StackFit.expand, children: [
+        Container(color: const Color(0xFF16181D)),
+        if (hasThumb)
+          FutureBuilder<Uint8List?>(
+            future: loadFileImage(thumbId),
+            builder: (_, s) {
+              final img = s.data;
+              if (img != null) return Image.memory(img, fit: BoxFit.cover, gaplessPlayback: true);
+              return const Center(child: Icon(Icons.play_arrow_rounded, color: Colors.white38, size: 42));
+            },
+          )
+        else
+          const Center(child: Icon(Icons.play_arrow_rounded, color: Colors.white38, size: 42)),
+        if (_badge != null)
+          Positioned(
+            right: 6,
+            bottom: 6,
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+              decoration: BoxDecoration(color: Colors.black.withValues(alpha: 0.78), borderRadius: BorderRadius.circular(5)),
+              child: Text(_badge!, style: const TextStyle(color: Colors.white, fontSize: 10.5, fontWeight: FontWeight.w700, letterSpacing: 0.2)),
+            ),
+          ),
+      ]),
+    );
+  }
 }

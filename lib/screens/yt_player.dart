@@ -25,6 +25,12 @@ class ChanItem {
   final String channelId, channelName, channelOwner;
   final String? channelLogoId;
   final bool locked;
+  final String? thumbId;
+  final int durationMs;
+  final int views;
+  final int likes;
+  final int dislikes;
+  final String? myVote;
   ChanItem({
     required this.e,
     required this.title,
@@ -34,6 +40,12 @@ class ChanItem {
     this.channelOwner = '',
     this.channelLogoId,
     this.locked = false,
+    this.thumbId,
+    this.durationMs = 0,
+    this.views = 0,
+    this.likes = 0,
+    this.dislikes = 0,
+    this.myVote,
   });
 
   factory ChanItem.fromRaw(Map<String, dynamic> f) {
@@ -41,6 +53,9 @@ class ChanItem {
     final e = Entry(media);
     final t = (f['title'] ?? '').toString();
     final logo = (f['channel_poster_id'] ?? '').toString();
+    final thumb = f['thumb'] is Map ? Map<String, dynamic>.from(f['thumb'] as Map) : <String, dynamic>{};
+    final tid = (thumb['id'] ?? '').toString();
+    final mv = (f['my_vote'] ?? '').toString();
     return ChanItem(
       e: e,
       title: t.isEmpty ? e.name : t,
@@ -50,8 +65,31 @@ class ChanItem {
       channelOwner: (f['owner'] ?? '').toString(),
       channelLogoId: logo.isEmpty ? null : logo,
       locked: f['locked'] == true,
+      thumbId: tid.isEmpty ? null : tid,
+      durationMs: f['duration_ms'] is int ? f['duration_ms'] as int : 0,
+      views: f['views'] is int ? f['views'] as int : 0,
+      likes: f['likes'] is int ? f['likes'] as int : 0,
+      dislikes: f['dislikes'] is int ? f['dislikes'] as int : 0,
+      myVote: mv.isEmpty ? null : mv,
     );
   }
+
+  ChanItem copyWith({String? thumbId, int? durationMs, int? views, int? likes, int? dislikes, String? myVote}) => ChanItem(
+        e: e,
+        title: title,
+        addedAt: addedAt,
+        channelId: channelId,
+        channelName: channelName,
+        channelOwner: channelOwner,
+        channelLogoId: channelLogoId,
+        locked: locked,
+        thumbId: thumbId ?? this.thumbId,
+        durationMs: durationMs ?? this.durationMs,
+        views: views ?? this.views,
+        likes: likes ?? this.likes,
+        dislikes: dislikes ?? this.dislikes,
+        myVote: myVote ?? this.myVote,
+      );
 }
 
 enum _DragMode { none, seek, scroll }
@@ -114,12 +152,125 @@ class _ChannelVideoPageState extends State<ChannelVideoPage> with WidgetsBinding
   String? bubble;
   final ScrollController listCtrl = ScrollController();
 
+  // YouTube-style engagement state (mockups): thumbnail, duration, views,
+  // like/dislike vote and subscribe — synced from queue items / channel info.
+  String? curThumbId;
+  int curDurationMs = 0, curViews = 0, curLikes = 0, curDislikes = 0;
+  String curAddedAt = '';
+  String? curMyVote;
+  bool voteBusy = false;
+  bool? subOverride;
+  int? subsOverride;
+  Future<Map<String, dynamic>?>? channelInfo;
+
   @override
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
     MiniPlayer.i.stop(); // opening the full page always closes the mini window
+    _syncMetaFromQueue();
+    channelInfo = _loadChannelInfo();
     _load(cur, title: curTitle);
+  }
+
+  /// Pull thumb/duration/views/likes for the CURRENT video out of the queue
+  /// (the queue always contains every channel/feed item, including the one
+  /// currently playing).
+  void _syncMetaFromQueue() {
+    final i = queue.indexWhere((x) => x.e.id == cur.id);
+    if (i < 0) return;
+    final it = queue[i];
+    curThumbId = it.thumbId;
+    curDurationMs = it.durationMs;
+    curViews = it.views;
+    curLikes = it.likes;
+    curDislikes = it.dislikes;
+    curAddedAt = it.addedAt;
+    curMyVote = it.myVote;
+  }
+
+  Future<Map<String, dynamic>?> _loadChannelInfo() async {
+    final cid = widget.channelId;
+    if (cid.isEmpty) return null;
+    try {
+      final r = await PipsApi.channelGet(cid);
+      return r['channel'] is Map ? Map<String, dynamic>.from(r['channel'] as Map) : null;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /// Write the current engagement counters back into the queue entry, so the
+  /// related list and mini-player handover stay consistent.
+  void _syncQueueMeta() {
+    final i = _curIdx;
+    if (i < 0) return;
+    final it = queue[i];
+    queue[i] = ChanItem(
+      e: it.e,
+      title: it.title,
+      addedAt: it.addedAt,
+      channelId: it.channelId,
+      channelName: it.channelName,
+      channelOwner: it.channelOwner,
+      channelLogoId: it.channelLogoId,
+      locked: it.locked,
+      thumbId: it.thumbId,
+      durationMs: it.durationMs,
+      views: it.views,
+      likes: curLikes,
+      dislikes: curDislikes,
+      myVote: curMyVote,
+    );
+  }
+
+  /// YouTube-style like / dislike. Tap the active vote again to remove it.
+  Future<void> _vote(String v) async {
+    if (voteBusy) return;
+    final target = curMyVote == v ? 'none' : v;
+    setState(() {
+      voteBusy = true;
+      if (curMyVote == 'like') curLikes = (curLikes - 1).clamp(0, 1 << 30);
+      if (curMyVote == 'dislike') curDislikes = (curDislikes - 1).clamp(0, 1 << 30);
+      if (target == 'like') curLikes += 1;
+      if (target == 'dislike') curDislikes += 1;
+      curMyVote = target == 'none' ? null : target;
+    });
+    try {
+      final r = await PipsApi.channelVote(cur.id, target);
+      if (mounted) {
+        setState(() {
+          if (r['likes'] is int) curLikes = r['likes'] as int;
+          if (r['dislikes'] is int) curDislikes = r['dislikes'] as int;
+          final mv = (r['my_vote'] ?? '').toString();
+          curMyVote = mv.isEmpty ? null : mv;
+        });
+        _syncQueueMeta();
+      }
+    } on ApiException catch (e) {
+      if (mounted) toast(context, e.message);
+    }
+    if (mounted) setState(() => voteBusy = false);
+  }
+
+  /// Subscribe / unsubscribe to the channel of the current video.
+  Future<void> _toggleSubscribe() async {
+    final cid = curChannelId;
+    if (cid.isEmpty) return;
+    setState(() => voteBusy = true);
+    try {
+      final r = await PipsApi.channelSubscribe(cid);
+      if (mounted) {
+        setState(() {
+          subOverride = r['subscribed'] == true;
+          if (r['subscribers'] is int) subsOverride = r['subscribers'] as int;
+        });
+        toast(context, subOverride == true ? 'Subscribed to ${curChannelName}' : 'Subscription removed');
+      }
+    } on ApiException catch (e) {
+      if (mounted) toast(context, e.message);
+    }
+    if (mounted) setState(() => voteBusy = false);
   }
 
   @override
@@ -207,6 +358,15 @@ class _ChannelVideoPageState extends State<ChannelVideoPage> with WidgetsBinding
             curChannelOwner = item.channelOwner;
             curChannelLogoId = item.channelLogoId;
           }
+          curThumbId = item.thumbId;
+          curDurationMs = item.durationMs;
+          curViews = item.views;
+          curLikes = item.likes;
+          curDislikes = item.dislikes;
+          curAddedAt = item.addedAt;
+          curMyVote = item.myVote;
+        } else {
+          _syncMetaFromQueue();
         }
         err = null;
         scrub = null;
@@ -409,61 +569,57 @@ class _ChannelVideoPageState extends State<ChannelVideoPage> with WidgetsBinding
 
   List<Widget> _panel() {
     final related = <ChanItem>[for (final x in queue) if (x.e.id != cur.id) x];
+    final owner = curChannelOwner.isNotEmpty ? curChannelOwner : widget.channelOwner;
     return [
       Padding(
         padding: const EdgeInsets.fromLTRB(16, 14, 16, 4),
         child: Text(curTitle, style: const TextStyle(fontSize: 17, fontWeight: FontWeight.w800, height: 1.3)),
       ),
+      // YouTube-style metadata line: @handle · views · likes · date
       Padding(
         padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
-        child: Text('${fmtBytes(cur.size)} · @${curChannelOwner.isNotEmpty ? curChannelOwner : widget.channelOwner}', style: TextStyle(fontSize: 12.5, color: Colors.grey.shade600)),
+        child: Text(
+          '@$owner · ${fmtCompact(curViews)} views'
+          '${curLikes > 0 ? ' · ${fmtCompact(curLikes)} likes' : ''}'
+          '${curAddedAt.isNotEmpty ? ' · ${fmtDate(curAddedAt)}' : ''}',
+          style: TextStyle(fontSize: 12.5, color: Colors.grey.shade600),
+        ),
       ),
-      // YouTube-style action chips
+      // Like / dislike pill + share actions (mock1 row)
       Padding(
         padding: const EdgeInsets.fromLTRB(12, 0, 12, 6),
-        child: Row(children: [
-          ActionChip(
-            avatar: const Icon(Icons.share_outlined, size: 17, color: AppTheme.blue),
-            label: const Text('Share', style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.w700)),
-            visualDensity: VisualDensity.compact,
-            onPressed: _shareLink,
-          ),
-          const SizedBox(width: 8),
-          ActionChip(
-            avatar: const Icon(Icons.copy_rounded, size: 16, color: AppTheme.teal),
-            label: const Text('Copy link', style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.w700)),
-            visualDensity: VisualDensity.compact,
-            onPressed: () {
-              Clipboard.setData(ClipboardData(text: shareChannelUrl));
-              toast(context, 'Video link copied');
-            },
-          ),
-          const SizedBox(width: 8),
-          ActionChip(
-            avatar: const Icon(Icons.widgets_outlined, size: 16, color: AppTheme.blue),
-            label: const Text('Embed', style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.w700)),
-            visualDensity: VisualDensity.compact,
-            onPressed: _embedLink,
-          ),
-        ]),
-      ),
-      Padding(
-        padding: const EdgeInsets.fromLTRB(12, 4, 12, 6),
-        child: GlassCard(
-          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+        child: SingleChildScrollView(
+          scrollDirection: Axis.horizontal,
           child: Row(children: [
-            ChannelAvatar(fileId: curChannelLogoId, name: curChannelName, radius: 18),
-            const SizedBox(width: 10),
-            Expanded(
-              child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                Text(curChannelName, maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 14)),
-                Text('@${curChannelOwner}', maxLines: 1, overflow: TextOverflow.ellipsis, style: TextStyle(fontSize: 11.5, color: Colors.grey.shade600)),
-              ]),
+            _votePill(),
+            const SizedBox(width: 8),
+            ActionChip(
+              avatar: const Icon(Icons.share_outlined, size: 17, color: AppTheme.blue),
+              label: const Text('Share', style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.w700)),
+              visualDensity: VisualDensity.compact,
+              onPressed: _shareLink,
             ),
-            Icon(Icons.subscriptions_outlined, size: 18, color: Colors.grey.shade500),
+            const SizedBox(width: 8),
+            ActionChip(
+              avatar: const Icon(Icons.copy_rounded, size: 16, color: AppTheme.teal),
+              label: const Text('Copy link', style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.w700)),
+              visualDensity: VisualDensity.compact,
+              onPressed: () {
+                Clipboard.setData(ClipboardData(text: shareChannelUrl));
+                toast(context, 'Video link copied');
+              },
+            ),
+            const SizedBox(width: 8),
+            ActionChip(
+              avatar: const Icon(Icons.widgets_outlined, size: 16, color: AppTheme.blue),
+              label: const Text('Embed', style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.w700)),
+              visualDensity: VisualDensity.compact,
+              onPressed: _embedLink,
+            ),
           ]),
         ),
       ),
+      _channelCard(),
       _CommentsSection(fileId: cur.id),
       const Padding(padding: EdgeInsets.fromLTRB(16, 10, 16, 4), child: Text('Up next', style: TextStyle(fontWeight: FontWeight.w800, fontSize: 15))),
       if (related.isEmpty)
@@ -474,11 +630,10 @@ class _ChannelVideoPageState extends State<ChannelVideoPage> with WidgetsBinding
       for (final it in related)
         ListTile(
           contentPadding: const EdgeInsets.symmetric(horizontal: 12),
-          leading: Container(
-            width: 96,
-            height: 54,
-            decoration: BoxDecoration(color: const Color(0xFF16181D), borderRadius: BorderRadius.circular(8)),
-            child: const Icon(Icons.play_arrow_rounded, color: Colors.white70, size: 30),
+          leading: SizedBox(
+            width: 120,
+            height: 68,
+            child: VideoThumb(thumbId: it.thumbId, durationMs: it.durationMs, fallbackBytes: it.e.size, radius: 8),
           ),
           title: Text(it.title, maxLines: 2, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 13.5, fontWeight: FontWeight.w600)),
           subtitle: Row(children: [
@@ -487,11 +642,102 @@ class _ChannelVideoPageState extends State<ChannelVideoPage> with WidgetsBinding
               const SizedBox(width: 5),
               Flexible(child: Text(it.channelName, maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 11)))]
             else
-              Text(fmtBytes(it.e.size), style: const TextStyle(fontSize: 11)),
+              Expanded(child: Text('${fmtCompact(it.views)} views${it.addedAt.isNotEmpty ? ' · ${fmtDate(it.addedAt)}' : ''}', maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 11))),
           ]),
           onTap: () => _load(it.e, title: it.title, item: it),
         ),
     ];
+  }
+
+  /// Like / dislike pill — one rounded container, tap again to clear (mock1).
+  Widget _votePill() {
+    final dark = Theme.of(context).brightness == Brightness.dark;
+    return Container(
+      height: 34,
+      padding: const EdgeInsets.symmetric(horizontal: 2),
+      decoration: BoxDecoration(
+        color: dark ? Colors.white.withValues(alpha: 0.07) : Colors.black.withValues(alpha: 0.045),
+        borderRadius: BorderRadius.circular(17),
+      ),
+      child: Row(mainAxisSize: MainAxisSize.min, children: [
+        InkWell(
+          borderRadius: const BorderRadius.horizontal(left: Radius.circular(17)),
+          onTap: voteBusy ? null : () => _vote('like'),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 11),
+            child: Row(children: [
+              Icon(curMyVote == 'like' ? Icons.thumb_up_alt_rounded : Icons.thumb_up_outlined, size: 17, color: curMyVote == 'like' ? AppTheme.blue : (dark ? Colors.white : Colors.black87)),
+              if (curLikes > 0) ...[
+                const SizedBox(width: 5),
+                Text(fmtCompact(curLikes), style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700, color: dark ? Colors.white : Colors.black87)),
+              ],
+            ]),
+          ),
+        ),
+        Container(width: 1, height: 18, color: Theme.of(context).dividerColor),
+        InkWell(
+          borderRadius: const BorderRadius.horizontal(right: Radius.circular(17)),
+          onTap: voteBusy ? null : () => _vote('dislike'),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 11),
+            child: Icon(curMyVote == 'dislike' ? Icons.thumb_down_alt_rounded : Icons.thumb_down_outlined, size: 17, color: curMyVote == 'dislike' ? AppTheme.red : (dark ? Colors.white : Colors.black87)),
+          ),
+        ),
+      ]),
+    );
+  }
+
+  /// Channel row with subscriber count + Subscribe button (mock1/mock2).
+  Widget _channelCard() {
+    final dark = Theme.of(context).brightness == Brightness.dark;
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(12, 4, 12, 6),
+      child: FutureBuilder<Map<String, dynamic>?>(
+        future: channelInfo,
+        builder: (_, s) {
+          final ch = s.data;
+          final subs = subsOverride ?? (ch != null && ch['subscribers'] is int ? ch['subscribers'] as int : null);
+          final subscribed = subOverride ?? (ch != null && ch['subscribed'] == true);
+          final mine = ch != null && (ch['owner'] ?? '').toString().isNotEmpty && (ch['owner'] ?? '').toString() == PipsApi.username;
+          return Container(
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+            decoration: BoxDecoration(
+              color: dark ? Colors.white.withValues(alpha: 0.05) : Colors.black.withValues(alpha: 0.035),
+              borderRadius: BorderRadius.circular(14),
+              border: Border.all(color: Theme.of(context).dividerColor.withValues(alpha: 0.6)),
+            ),
+            child: Row(children: [
+              ChannelAvatar(fileId: curChannelLogoId, name: curChannelName, radius: 19),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                  Text(curChannelName, maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 14)),
+                  Text(
+                    '@${curChannelOwner.isEmpty ? 'channel' : curChannelOwner}${subs != null ? ' · ${fmtCompact(subs)} subscribers' : ''}',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(fontSize: 11.5, color: Colors.grey.shade600),
+                  ),
+                ]),
+              ),
+              if (mine)
+                Text('Your channel', style: TextStyle(fontSize: 11.5, fontWeight: FontWeight.w700, color: Colors.grey.shade500))
+              else
+                FilledButton(
+                  onPressed: voteBusy ? null : _toggleSubscribe,
+                  style: FilledButton.styleFrom(
+                    visualDensity: VisualDensity.compact,
+                    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 9),
+                    backgroundColor: subscribed ? (dark ? Colors.white24 : Colors.black26) : AppTheme.red,
+                    foregroundColor: subscribed ? (dark ? Colors.white : Colors.white) : Colors.white,
+                  ),
+                  child: Text(subscribed ? 'Subscribed' : 'Subscribe', style: const TextStyle(fontSize: 12.5, fontWeight: FontWeight.w800)),
+                ),
+            ]),
+          );
+        },
+      ),
+    );
   }
 
   /// Web channel UI link: https://…/channel/<slug>/<file_id>
