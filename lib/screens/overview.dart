@@ -156,26 +156,10 @@ class _OverviewPageState extends State<OverviewPage> {
       child: Container(
         margin: const EdgeInsets.only(bottom: 14),
         child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          // 16:9 thumbnail area (YouTube template)
-          Container(
-            width: double.infinity,
-            height: MediaQuery.of(context).size.width * 9 / 16,
-            decoration: BoxDecoration(
-              gradient: const LinearGradient(begin: Alignment.topLeft, end: Alignment.bottomRight, colors: [Color(0xFF1F2430), Color(0xFF11141B)]),
-              borderRadius: BorderRadius.circular(14),
-            ),
-            child: Stack(children: [
-              const Center(child: Icon(Icons.play_circle_fill_rounded, color: Colors.white70, size: 54)),
-              Positioned(
-                right: 10,
-                bottom: 10,
-                child: Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-                  decoration: BoxDecoration(color: Colors.black54, borderRadius: BorderRadius.circular(6)),
-                  child: Text(fmtBytes(it.e.size), style: const TextStyle(color: Colors.white, fontSize: 10.5, fontWeight: FontWeight.w600)),
-                ),
-              ),
-            ]),
+          // 16:9 thumbnail area (mock3) — real thumbnail + duration badge
+          AspectRatio(
+            aspectRatio: 16 / 9,
+            child: VideoThumb(thumbId: it.thumbId, durationMs: it.durationMs, fallbackBytes: it.e.size, radius: 14),
           ),
           const SizedBox(height: 9),
           Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
@@ -185,7 +169,7 @@ class _OverviewPageState extends State<OverviewPage> {
               child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
                 Text(it.title, maxLines: 2, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 14.5, fontWeight: FontWeight.w700, height: 1.25)),
                 const SizedBox(height: 3),
-                Text('${it.channelName.isNotEmpty ? it.channelName : '@${it.channelOwner}'} · ${fmtDate(it.addedAt)}', maxLines: 1, overflow: TextOverflow.ellipsis, style: TextStyle(fontSize: 12, color: HomeColors.of(context).text2)),
+                Text('${it.channelName.isNotEmpty ? it.channelName : '@${it.channelOwner}'} · ${fmtCompact(it.views)} views${it.addedAt.isNotEmpty ? ' · ${fmtDate(it.addedAt)}' : ''}', maxLines: 1, overflow: TextOverflow.ellipsis, style: TextStyle(fontSize: 12, color: HomeColors.of(context).text2)),
               ]),
             ),
           ]),

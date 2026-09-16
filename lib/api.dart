@@ -98,7 +98,7 @@ class PipsApi {
 
   static Map<String, String> get _headers => {
         if (session != null && session!.isNotEmpty) 'Cookie': 'pips_session=$session',
-        'User-Agent': 'PipsApp/3.11 (Flutter)',
+        'User-Agent': 'PipsApp/3.20 (Flutter)',
       };
 
   static Map<String, String> get authHeaders => _headers;
@@ -363,15 +363,36 @@ class PipsApi {
     return r['channels'] is List ? r['channels'] : [];
   }
   static Future<Map<String, dynamic>> channelGet(String cid) => _req('GET', '$api/channels/${enc(cid)}');
-  static Future<Map<String, dynamic>> channelCreate(String name, String description, [String? posterFileId]) =>
-      _req('POST', '$api/channels/create', {'name': name, 'description': description, if (posterFileId != null && posterFileId.isNotEmpty) 'poster_file_id': posterFileId});
+  static Future<Map<String, dynamic>> channelCreate(String name, String description, [String? posterFileId, String? bannerFileId]) =>
+      _req('POST', '$api/channels/create', {
+        'name': name,
+        'description': description,
+        if (posterFileId != null && posterFileId.isNotEmpty) 'poster_file_id': posterFileId,
+        if (bannerFileId != null && bannerFileId.isNotEmpty) 'banner_file_id': bannerFileId,
+      });
   static Future<Map<String, dynamic>> channelPatch(String cid, Map<String, dynamic> changes) => _req('PATCH', '$api/channels/${enc(cid)}', changes);
   static Future<void> channelDelete(String cid) => _req('DELETE', '$api/channels/${enc(cid)}');
-  static Future<Map<String, dynamic>> channelAddFile(String cid, String fileId, [String title = '', String description = '']) =>
-      _req('POST', '$api/channels/${enc(cid)}/files', {'file_id': fileId, 'title': title, 'description': description});
+  static Future<Map<String, dynamic>> channelAddFile(String cid, String fileId, [String title = '', String description = '', String? thumbFileId, int durationMs = 0]) =>
+      _req('POST', '$api/channels/${enc(cid)}/files', {
+        'file_id': fileId,
+        'title': title,
+        'description': description,
+        if (thumbFileId != null && thumbFileId.isNotEmpty) 'thumb_file_id': thumbFileId,
+        if (durationMs > 0) 'duration_ms': durationMs,
+      });
   static Future<void> channelRemoveFile(String cid, String fileId) => _req('DELETE', '$api/channels/${enc(cid)}/files/${enc(fileId)}');
   static Future<Map<String, dynamic>> channelPatchFile(String cid, String fileId, Map<String, dynamic> changes) =>
       _req('PATCH', '$api/channels/${enc(cid)}/files/${enc(fileId)}', changes);
+
+  /// Subscribe / unsubscribe to a PUBLIC channel (toggle). Returns
+  /// {subscribed: bool, subscribers: int}.
+  static Future<Map<String, dynamic>> channelSubscribe(String cid) =>
+      _req('POST', '$api/channels/${enc(cid)}/subscribe', {});
+
+  /// Like / dislike a channel video — vote = 'like' | 'dislike' | 'none'.
+  /// Returns {likes, dislikes, my_vote}.
+  static Future<Map<String, dynamic>> channelVote(String fileId, String vote) =>
+      _req('POST', '$api/channels/files/${enc(fileId)}/vote', {'vote': vote});
 
   /// Watch history of a channel video (who + when) — owner only.
   static Future<List<dynamic>> channelFileViews(String cid, String fileId) async {

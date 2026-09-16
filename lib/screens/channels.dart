@@ -1,7 +1,12 @@
+import 'dart:async';
 import 'dart:io';
 import 'dart:math';
+import 'dart:typed_data';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
+import 'package:path_provider/path_provider.dart';
+import 'package:video_player/video_player.dart';
+import 'package:video_thumbnail/video_thumbnail.dart';
 import '../api.dart';
 import '../models.dart';
 import '../widgets.dart';
@@ -95,10 +100,12 @@ Widget _channelTile(BuildContext context, Map<String, dynamic> c, {required bool
   final id = (c['id'] ?? '').toString();
   final desc = (c['description'] ?? '').toString();
   final count = c['file_count'] is num ? (c['file_count'] as num).toInt() : 0;
+  final subs = c['subscribers'] is num ? (c['subscribers'] as num).toInt() : 0;
+  final meta = '${fmtCompact(subs)} subscribers · $count videos';
   return ListTile(
     leading: ChannelAvatar(fileId: _posterId(c), name: name, radius: 22),
     title: Text(name, style: const TextStyle(fontWeight: FontWeight.w600)),
-    subtitle: Text(desc.isEmpty ? '$count videos' : '$desc · $count videos', maxLines: 1, overflow: TextOverflow.ellipsis),
+    subtitle: Text(desc.isEmpty ? meta : '$desc · $meta', maxLines: 1, overflow: TextOverflow.ellipsis),
     trailing: mine ? PopupMenuButton<String>(onSelected: (a) async {
       if (a == 'del') {
         final ok = await showDialog<bool>(context: context, builder: (ctx) => AlertDialog(title: Text('Delete "$name"?'), actions: [TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')), FilledButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('Delete'))]));
@@ -117,13 +124,13 @@ class CreateChannelPage extends StatefulWidget {
 
 class _CreateChannelPageState extends State<CreateChannelPage> {
   final name = TextEditingController(), desc = TextEditingController();
-  String? posterId, posterPath;
-  bool busy = false, upPoster = false;
+  String? posterId, posterPath, bannerId, bannerPath;
+  bool busy = false, upPoster = false, upBanner = false;
 
   Future<void> create() async {
     setState(() => busy = true);
     try {
-      await PipsApi.channelCreate(name.text.trim(), desc.text.trim(), posterId);
+      await PipsApi.channelCreate(name.text.trim(), desc.text.trim(), posterId, bannerId);
       if (mounted) Navigator.pop(context);
     } on ApiException catch (e) { if (mounted) toast(context, e.message); }
     if (mounted) setState(() => busy = false);
@@ -144,6 +151,22 @@ class _CreateChannelPageState extends State<CreateChannelPage> {
     if (mounted) setState(() => upPoster = false);
   }
 
+  /// Wide channel banner (mock2/mock4) — optional at creation.
+  Future<void> pickBanner() async {
+    final r = await FilePicker.platform.pickFiles(type: FileType.image);
+    final f = r?.files.single;
+    if (f?.path == null) return;
+    setState(() { bannerPath = f!.path; upBanner = true; });
+    try {
+      final up = await PipsApi.uploadSingle(File(f!.path!), f.name, _imgMime(f.name), 'public', (_) {});
+      setState(() => bannerId = up['id']?.toString());
+    } on ApiException catch (e) {
+      if (mounted) toast(context, e.message);
+      if (mounted) setState(() => bannerPath = null);
+    }
+    if (mounted) setState(() => upBanner = false);
+  }
+
   @override
   Widget build(BuildContext context) => Scaffold(
         appBar: AppBar(title: const Text('Create channel')),
@@ -159,6 +182,26 @@ class _CreateChannelPageState extends State<CreateChannelPage> {
               const SizedBox(height: 8),
               TextButton.icon(onPressed: upPoster ? null : pickPoster, icon: const Icon(Icons.add_a_photo_outlined, size: 18), label: Text(posterPath == null ? 'Choose channel logo' : 'Change logo')),
               if (upPoster) const SizedBox(width: 120, child: LinearProgressIndicator(minHeight: 3)),
+              const SizedBox(height: 6),
+              // Banner preview (mock2/mock4)
+              GestureDetector(
+                onTap: upBanner ? null : pickBanner,
+                child: Container(
+                  width: double.infinity,
+                  height: 96,
+                  decoration: BoxDecoration(
+                    color: const Color(0xFF16181D),
+                    borderRadius: BorderRadius.circular(14),
+                    border: Border.all(color: Theme.of(context).dividerColor),
+                  ),
+                  child: bannerPath != null
+                      ? ClipRRect(borderRadius: BorderRadius.circular(14), child: Image.file(File(bannerPath!), fit: BoxFit.cover, width: double.infinity, height: 96))
+                      : const Center(child: Icon(Icons.wallpaper_outlined, color: Colors.white24, size: 30)),
+                ),
+              ),
+              const SizedBox(height: 4),
+              TextButton.icon(onPressed: upBanner ? null : pickBanner, icon: const Icon(Icons.wallpaper_outlined, size: 18), label: Text(bannerPath == null ? 'Choose channel banner (optional)' : 'Change banner')),
+              if (upBanner) const SizedBox(width: 120, child: LinearProgressIndicator(minHeight: 3)),
             ]),
           ),
           const SizedBox(height: 12),
@@ -181,6 +224,10 @@ class ChannelPage extends StatefulWidget {
 class _ChannelPageState extends State<ChannelPage> {
   Key refresh = UniqueKey();
   bool descOpen = false;
+  int tab = 0; // 0 = Videos, 1 = About
+  bool? subOverride;
+  int? subsOverride;
+  bool subBusy = false;
 
   @override
   Widget build(BuildContext context) => Scaffold(
@@ -203,6 +250,8 @@ class _ChannelPageState extends State<ChannelPage> {
     final desc = (ch['description'] ?? '').toString();
     final owner = (ch['owner'] ?? '').toString();
     final posterId = _posterId(ch);
+    final banner = ch['banner'] is Map ? Map<String, dynamic>.from(ch['banner'] as Map) : <String, dynamic>{};
+    final bannerId = (banner['id'] ?? '').toString();
     final mine = owner.isNotEmpty && owner == PipsApi.username;
     final filesRaw = ch['files'] is List ? (ch['files'] as List).map((x) => Map<String, dynamic>.from(x as Map)).toList() : <Map<String, dynamic>>[];
     final items = <ChanItem>[];
@@ -210,9 +259,36 @@ class _ChannelPageState extends State<ChannelPage> {
       final it = ChanItem.fromRaw(f);
       if (it.e.id.isNotEmpty) items.add(it);
     }
+    final subs = subsOverride ?? (ch['subscribers'] is int ? ch['subscribers'] as int : 0);
+    final subscribed = subOverride ?? (ch['subscribed'] == true);
     return ListView(padding: const EdgeInsets.only(bottom: 32), children: [
-      _header(ch, name, desc, owner, posterId, items.length, mine),
-      if (mine)
+      _header(ch, name, desc, owner, posterId, bannerId, items.length, subs, mine),
+      if (mine) ...[
+        Padding(
+          padding: const EdgeInsets.fromLTRB(12, 10, 12, 4),
+          child: Row(children: [
+            Expanded(
+              child: OutlinedButton.icon(
+                onPressed: () => Navigator.push(context, MaterialPageRoute(builder: (_) => ChannelAnalyticsPage(channel: Map<String, dynamic>.of(ch)))),
+                icon: const Icon(Icons.insights, size: 18),
+                label: const Text('Analytics'),
+                style: OutlinedButton.styleFrom(padding: const EdgeInsets.symmetric(vertical: 12)),
+              ),
+            ),
+            const SizedBox(width: 10),
+            Expanded(
+              child: OutlinedButton.icon(
+                onPressed: () async {
+                  final changed = await Navigator.push<bool>(context, MaterialPageRoute(builder: (_) => ChannelSettingsPage(channel: Map<String, dynamic>.of(ch))));
+                  if (changed == true && mounted) setState(() => refresh = UniqueKey());
+                },
+                icon: const Icon(Icons.edit_outlined, size: 18),
+                label: const Text('Edit channel'),
+                style: OutlinedButton.styleFrom(padding: const EdgeInsets.symmetric(vertical: 12)),
+              ),
+            ),
+          ]),
+        ),
         Padding(
           padding: const EdgeInsets.fromLTRB(12, 4, 12, 8),
           child: FilledButton.icon(
@@ -222,57 +298,121 @@ class _ChannelPageState extends State<ChannelPage> {
             style: FilledButton.styleFrom(padding: const EdgeInsets.symmetric(vertical: 12)),
           ),
         ),
-      Padding(padding: const EdgeInsets.fromLTRB(16, 6, 16, 4), child: Text('Videos', style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 15))),
-      if (items.isEmpty) const EmptyState(icon: '📼', text: 'No videos in this channel yet.'),
-      for (final it in items) _videoTile(it, items, mine, posterId, owner, name),
+      ] else
+        Padding(
+          padding: const EdgeInsets.fromLTRB(12, 10, 12, 8),
+          child: FilledButton(
+            onPressed: subBusy ? null : () => _toggleSubscribe(ch),
+            style: FilledButton.styleFrom(
+              padding: const EdgeInsets.symmetric(vertical: 13),
+              backgroundColor: subscribed ? Theme.of(context).dividerColor : AppTheme.red,
+              foregroundColor: subscribed ? (Theme.of(context).brightness == Brightness.dark ? Colors.white : Colors.black87) : Colors.white,
+            ),
+            child: Text(subBusy ? '…' : (subscribed ? 'Subscribed' : 'Subscribe'), style: const TextStyle(fontWeight: FontWeight.w800)),
+          ),
+        ),
+      // Videos / About tabs (mock2)
+      Padding(
+        padding: const EdgeInsets.fromLTRB(12, 2, 12, 6),
+        child: Row(children: [
+          _tabBtn('Videos', 0),
+          const SizedBox(width: 8),
+          _tabBtn('About', 1),
+        ]),
+      ),
+      if (tab == 0) ...[
+        if (items.isEmpty) const EmptyState(icon: '📼', text: 'No videos in this channel yet.'),
+        for (final it in items) _videoTile(it, items, mine, posterId, owner, name),
+      ] else
+        _aboutTab(desc, owner, items, subs),
     ]);
   }
 
-  Widget _header(Map<String, dynamic> settingsChannel, String name, String desc, String owner, String? posterId, int count, bool mine) {
-    final visibility = (settingsChannel['visibility'] ?? 'public').toString();
-    return Container(
-      margin: const EdgeInsets.fromLTRB(12, 12, 12, 4),
-      padding: const EdgeInsets.all(14),
-      decoration: BoxDecoration(
-        color: Theme.of(context).cardColor,
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: Theme.of(context).dividerColor),
+  Widget _tabBtn(String label, int i) {
+    final active = tab == i;
+    final dark = Theme.of(context).brightness == Brightness.dark;
+    return GestureDetector(
+      onTap: () => setState(() => tab = i),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 7),
+        decoration: BoxDecoration(
+          color: active ? (dark ? Colors.white.withValues(alpha: 0.13) : Colors.black.withValues(alpha: 0.08)) : Colors.transparent,
+          borderRadius: BorderRadius.circular(18),
+          border: Border.all(color: active ? Colors.transparent : Theme.of(context).dividerColor),
+        ),
+        child: Text(label, style: TextStyle(fontSize: 12.5, fontWeight: active ? FontWeight.w800 : FontWeight.w600, color: active ? null : Colors.grey.shade600)),
       ),
-      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-        Row(children: [
-          ChannelAvatar(fileId: posterId, name: name, radius: 26),
-          const SizedBox(width: 12),
-          Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-            Text(name, style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w800)),
-            const SizedBox(height: 2),
-            Text('@$owner · $count videos${mine ? ' · ${visibility == 'private' ? 'Private 🔒' : 'Public 🌐'}' : ''}', style: TextStyle(fontSize: 12.5, color: Colors.grey.shade600)),
-          ])),
-          if (mine)
-            PopupMenuButton<String>(
-              onSelected: (a) async {
-                if (a == 'del') {
-                  await _delete();
-                } else if (a == 'settings') {
-                  final changed = await Navigator.push<bool>(context, MaterialPageRoute(builder: (_) => ChannelSettingsPage(channel: Map<String, dynamic>.of(settingsChannel))));
-                  if (changed == true && mounted) setState(() => refresh = UniqueKey());
-                }
-              },
-              itemBuilder: (_) => const [
-                PopupMenuItem(value: 'settings', child: Text('Channel settings')),
-                PopupMenuItem(value: 'del', child: Text('Delete channel')),
-              ],
+    );
+  }
+
+  Future<void> _toggleSubscribe(Map<String, dynamic> ch) async {
+    final cid = (ch['id'] ?? '').toString();
+    if (cid.isEmpty) return;
+    setState(() => subBusy = true);
+    try {
+      final r = await PipsApi.channelSubscribe(cid);
+      if (mounted) {
+        setState(() {
+          subOverride = r['subscribed'] == true;
+          if (r['subscribers'] is int) subsOverride = r['subscribers'] as int;
+        });
+      }
+    } on ApiException catch (e) {
+      if (mounted) toast(context, e.message);
+    }
+    if (mounted) setState(() => subBusy = false);
+  }
+
+  Widget _header(Map<String, dynamic> settingsChannel, String name, String desc, String owner, String? posterId, String bannerId, int count, int subs, bool mine) {
+    final visibility = (settingsChannel['visibility'] ?? 'public').toString();
+    return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+      // Banner (mock2/mock4) with the avatar overlapping its bottom edge
+      Stack(clipBehavior: Clip.none, children: [
+        Container(
+          margin: const EdgeInsets.fromLTRB(12, 12, 12, 0),
+          height: 128,
+          child: ClipRRect(
+            borderRadius: BorderRadius.circular(16),
+            child: bannerId.isNotEmpty
+                ? FutureBuilder<Uint8List?>(
+                    future: loadFileImage(bannerId),
+                    builder: (_, s) => s.data != null
+                        ? Image.memory(s.data!, fit: BoxFit.cover, width: double.infinity, height: 128, gaplessPlayback: true)
+                        : Container(color: const Color(0xFF16181D)),
+                  )
+                : Container(
+                    decoration: const BoxDecoration(gradient: LinearGradient(begin: Alignment.topLeft, end: Alignment.bottomRight, colors: [Color(0xFF2A1B3D), Color(0xFF16181D)])),
+                  ),
+          ),
+        ),
+        Positioned(
+          left: 26,
+          bottom: -28,
+          child: Container(
+            padding: const EdgeInsets.all(3),
+            decoration: BoxDecoration(color: Theme.of(context).scaffoldBackgroundColor, shape: BoxShape.circle),
+            child: ChannelAvatar(fileId: posterId, name: name, radius: 31),
+          ),
+        ),
+      ]),
+      const SizedBox(height: 36),
+      Padding(
+        padding: const EdgeInsets.fromLTRB(16, 0, 16, 0),
+        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Text(name, style: const TextStyle(fontSize: 20, fontWeight: FontWeight.w800)),
+          const SizedBox(height: 2),
+          Text('@$owner · ${fmtCompact(subs)} subscribers · $count videos${mine ? ' · ${visibility == 'private' ? 'Private 🔒' : 'Public 🌐'}' : ''}', style: TextStyle(fontSize: 12.5, color: Colors.grey.shade600)),
+          if (desc.isNotEmpty)
+            Padding(
+              padding: const EdgeInsets.only(top: 8),
+              child: GestureDetector(
+                onTap: () => setState(() => descOpen = !descOpen),
+                child: Text(desc, maxLines: descOpen ? 20 : 2, overflow: TextOverflow.ellipsis, style: TextStyle(fontSize: 13, color: Colors.grey.shade700, height: 1.4)),
+              ),
             ),
         ]),
-        if (desc.isNotEmpty)
-          Padding(
-            padding: const EdgeInsets.only(top: 10),
-            child: GestureDetector(
-              onTap: () => setState(() => descOpen = !descOpen),
-              child: Text(desc, maxLines: descOpen ? 20 : 2, overflow: TextOverflow.ellipsis, style: TextStyle(fontSize: 13, color: Colors.grey.shade700, height: 1.4)),
-            ),
-          ),
-      ]),
-    );
+      ),
+    ]);
   }
 
   Widget _videoTile(ChanItem it, List<ChanItem> items, bool mine, String? posterId, String owner, String name) {
@@ -282,18 +422,23 @@ class _ChannelPageState extends State<ChannelPage> {
     return ListTile(
       contentPadding: const EdgeInsets.symmetric(horizontal: 12),
       leading: video
-          ? Stack(children: [
-              Container(
-                width: 104, height: 58,
-                decoration: BoxDecoration(color: const Color(0xFF16181D), borderRadius: BorderRadius.circular(10)),
-                child: const Icon(Icons.play_arrow_rounded, color: Colors.white70, size: 32),
-              ),
-              if (it.locked)
-                Positioned(right: 4, bottom: 4, child: Container(padding: const EdgeInsets.all(3), decoration: BoxDecoration(color: Colors.black.withValues(alpha: 0.7), borderRadius: BorderRadius.circular(6)), child: const Icon(Icons.lock, size: 12, color: Colors.white))),
-            ])
+          ? SizedBox(
+              width: 120,
+              height: 68,
+              child: Stack(children: [
+                VideoThumb(thumbId: it.thumbId, durationMs: it.durationMs, fallbackBytes: e.size, radius: 9),
+                if (it.locked)
+                  Positioned(right: 4, top: 4, child: Container(padding: const EdgeInsets.all(3), decoration: BoxDecoration(color: Colors.black.withValues(alpha: 0.7), borderRadius: BorderRadius.circular(6)), child: const Icon(Icons.lock, size: 12, color: Colors.white))),
+              ]),
+            )
           : IconTile(icon: m.icon, bg: m.bg, fg: m.fg, size: 46),
       title: Text(it.title, maxLines: 2, overflow: TextOverflow.ellipsis, style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 14)),
-      subtitle: Text('${it.locked ? '🔒 Locked · ' : ''}${fmtBytes(e.size)}${it.addedAt.isNotEmpty ? ' · ${fmtDate(it.addedAt)}' : ''}', style: const TextStyle(fontSize: 11.5)),
+      subtitle: Text(
+        video
+            ? '${it.locked ? '🔒 Locked · ' : ''}${fmtCompact(it.views)} views${it.addedAt.isNotEmpty ? ' · ${fmtDate(it.addedAt)}' : ''}'
+            : '${it.locked ? '🔒 Locked · ' : ''}${fmtBytes(e.size)}${it.addedAt.isNotEmpty ? ' · ${fmtDate(it.addedAt)}' : ''}',
+        style: const TextStyle(fontSize: 11.5),
+      ),
       trailing: mine
           ? IconButton(
               tooltip: 'Video options',
@@ -352,6 +497,56 @@ class _ChannelPageState extends State<ChannelPage> {
     });
   }
 
+  /// About tab — stats card + full description (mock2 style).
+  Widget _aboutTab(String desc, String owner, List<ChanItem> items, int subs) {
+    int views = 0, likes = 0;
+    for (final it in items) {
+      views += it.views;
+      likes += it.likes;
+    }
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(12, 4, 12, 0),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Container(
+          width: double.infinity,
+          padding: const EdgeInsets.all(14),
+          decoration: BoxDecoration(color: Theme.of(context).cardColor, borderRadius: BorderRadius.circular(16), border: Border.all(color: Theme.of(context).dividerColor)),
+          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            const Text('Stats', style: TextStyle(fontWeight: FontWeight.w800, fontSize: 14)),
+            const SizedBox(height: 10),
+            Row(children: [
+              _stat(fmtCompact(views), 'Views'),
+              _stat(fmtCompact(likes), 'Likes'),
+              _stat(fmtCompact(subs), 'Subscribers'),
+              _stat('${items.length}', 'Videos'),
+            ]),
+          ]),
+        ),
+        const SizedBox(height: 10),
+        Container(
+          width: double.infinity,
+          padding: const EdgeInsets.all(14),
+          decoration: BoxDecoration(color: Theme.of(context).cardColor, borderRadius: BorderRadius.circular(16), border: Border.all(color: Theme.of(context).dividerColor)),
+          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            const Text('Description', style: TextStyle(fontWeight: FontWeight.w800, fontSize: 14)),
+            const SizedBox(height: 6),
+            Text(desc.isEmpty ? 'No description yet.' : desc, style: TextStyle(fontSize: 13, color: Colors.grey.shade700, height: 1.45)),
+            const SizedBox(height: 8),
+            Text('Created by @$owner', style: TextStyle(fontSize: 11.5, color: Colors.grey.shade600)),
+          ]),
+        ),
+      ]),
+    );
+  }
+
+  Widget _stat(String v, String label) => Expanded(
+        child: Column(children: [
+          Text(v, style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w800)),
+          const SizedBox(height: 2),
+          Text(label, style: TextStyle(fontSize: 11, color: Colors.grey.shade600)),
+        ]),
+      );
+
 
   Future<void> _delete() async {
     final ok = await showDialog<bool>(context: context, builder: (ctx) => AlertDialog(title: Text('Delete "${widget.name}"?'), actions: [TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')), FilledButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('Delete'))]));
@@ -383,6 +578,9 @@ class _AddVideoSheetState extends State<AddVideoSheet> {
   double prog = 0;
   String status = '';
   String? err;
+  Uint8List? thumbBytes;
+  int durationMs = 0;
+  bool prepping = false;
 
   static String _videoMime(String name) {
     final n = name.toLowerCase();
@@ -404,6 +602,29 @@ class _AddVideoSheetState extends State<AddVideoSheet> {
       manual = false;
       if (title.text.isEmpty) title.text = f.name.replaceFirst(RegExp(r'\.[^.]+$'), '');
     });
+    unawaited(_prepare(f!.path!));
+  }
+
+  /// Grab a poster frame + duration from the picked video (device-side), so
+  /// channel cards / feed / related lists show real YouTube-style thumbnails.
+  Future<void> _prepare(String path) async {
+    if (mounted) setState(() => prepping = true);
+    try {
+      try {
+        final vc = VideoPlayerController.file(File(path));
+        await vc.initialize();
+        durationMs = vc.value.duration.inMilliseconds;
+        try {
+          await vc.dispose();
+        } catch (_) {}
+      } catch (_) {}
+      try {
+        thumbBytes = await VideoThumbnail.thumbnailData(video: path, imageFormat: ImageFormat.JPEG, maxWidth: 640, quality: 80);
+      } catch (_) {
+        thumbBytes = null;
+      }
+    } catch (_) {}
+    if (mounted) setState(() => prepping = false);
   }
 
   Future<void> submit() async {
@@ -414,6 +635,7 @@ class _AddVideoSheetState extends State<AddVideoSheet> {
       if (manual) {
         fid = manualId.text.trim();
         if (fid.isEmpty) throw ApiException('Enter a file ID first.', 0);
+        await PipsApi.channelAddFile(widget.cid, fid, title.text.trim());
       } else {
         final f = picked;
         if (f == null) throw ApiException('Choose a video first.', 0);
@@ -439,8 +661,23 @@ class _AddVideoSheetState extends State<AddVideoSheet> {
           await PipsApi.uploadFinish(fid, total, pickedSize, pickedName, mime, 'public');
         }
         if (fid.isEmpty) throw ApiException('Upload failed — no file id returned.', 0);
+        // Poster frame + duration → uploaded as a small public image and
+        // linked to the channel video (YouTube-style thumbnails everywhere).
+        String? thumbId;
+        if (thumbBytes != null && thumbBytes!.isNotEmpty) {
+          try {
+            final dir = await getTemporaryDirectory();
+            final tname = 'thumb_${DateTime.now().millisecondsSinceEpoch}.jpg';
+            final tf = File('${dir.path}/$tname');
+            await tf.writeAsBytes(thumbBytes!);
+            final tup = await PipsApi.uploadSingle(tf, tname, 'image/jpeg', 'public', (_) {});
+            thumbId = (tup['id'] ?? '').toString();
+          } catch (_) {
+            thumbId = null;
+          }
+        }
+        await PipsApi.channelAddFile(widget.cid, fid, title.text.trim(), '', thumbId, durationMs);
       }
-      await PipsApi.channelAddFile(widget.cid, fid, title.text.trim());
       if (mounted) Navigator.pop(context, true);
     } on ApiException catch (e) {
       if (mounted) setState(() { err = e.message; busy = false; status = ''; });
@@ -460,7 +697,7 @@ class _AddVideoSheetState extends State<AddVideoSheet> {
             ] else ...[
               if (manual && picked == null) ...[
                 TextField(controller: manualId, decoration: const InputDecoration(labelText: 'File ID', border: OutlineInputBorder())),
-                TextButton(onPressed: () => setState(() => manual = false), child: const Text('Pick from device instead')),
+                TextButton(onPressed: () => setState(() { manual = false; thumbBytes = null; durationMs = 0; }), child: const Text('Pick from device instead')),
               ] else ...[
                 Container(
                   padding: const EdgeInsets.all(10),
@@ -470,10 +707,22 @@ class _AddVideoSheetState extends State<AddVideoSheet> {
                   ),
                   child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
                     Row(children: [
-                      const Icon(Icons.videocam, size: 18, color: AppTheme.blue),
-                      const SizedBox(width: 8),
-                      Expanded(child: Text(pickedName, maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 13))),
-                      Text(fmtBytes(pickedSize), style: TextStyle(fontSize: 11.5, color: Colors.grey.shade600)),
+                      SizedBox(
+                        width: 92,
+                        height: 52,
+                        child: ClipRRect(
+                          borderRadius: BorderRadius.circular(8),
+                          child: thumbBytes != null
+                              ? Image.memory(thumbBytes!, fit: BoxFit.cover, gaplessPlayback: true)
+                              : Container(color: const Color(0xFF16181D), child: Center(child: prepping ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2)) : const Icon(Icons.play_arrow_rounded, color: Colors.white38, size: 26))),
+                        ),
+                      ),
+                      const SizedBox(width: 10),
+                      Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                        Text(pickedName, maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 13)),
+                        const SizedBox(height: 2),
+                        Text('${fmtBytes(pickedSize)}${durationMs > 0 ? ' · ${fmtDurationMs(durationMs)}' : ''}${prepping ? ' · preparing…' : ''}', style: TextStyle(fontSize: 11.5, color: Colors.grey.shade600)),
+                      ])),
                     ]),
                     if (busy) ...[
                       const SizedBox(height: 8),
@@ -520,7 +769,50 @@ class _ChannelSettingsPageState extends State<ChannelSettingsPage> {
   late final TextEditingController name = TextEditingController(text: (widget.channel['name'] ?? '').toString());
   late final TextEditingController desc = TextEditingController(text: (widget.channel['description'] ?? '').toString());
   late String visibility = ((widget.channel['visibility'] ?? 'public').toString() == 'private') ? 'private' : 'public';
-  bool busy = false, deleting = false;
+  bool busy = false, deleting = false, upArt = false;
+
+  String? get _logoId {
+    final p = widget.channel['poster'];
+    if (p is! Map) return null;
+    final id = (p['id'] ?? '').toString();
+    return id.isEmpty ? null : id;
+  }
+
+  String? get _bannerId {
+    final b = widget.channel['banner'];
+    if (b is! Map) return null;
+    final id = (b['id'] ?? '').toString();
+    return id.isEmpty ? null : id;
+  }
+
+  /// Upload a picked image and attach it as the channel logo (poster) or
+  /// banner — mock2/mock4 artwork.
+  Future<void> pickArt({required bool banner}) async {
+    final r = await FilePicker.platform.pickFiles(type: FileType.image);
+    final f = r?.files.single;
+    if (f?.path == null) return;
+    setState(() => upArt = true);
+    try {
+      final up = await PipsApi.uploadSingle(File(f!.path!), f.name, _imgMime(f.name), 'public', (_) {});
+      final id = (up['id'] ?? '').toString();
+      if (id.isNotEmpty) {
+        await PipsApi.channelPatch(cid, {banner ? 'banner_file_id' : 'poster_file_id': id});
+        if (mounted) {
+          setState(() {
+            if (banner) {
+              widget.channel['banner'] = {'id': id, 'name': f.name, 'mime': _imgMime(f.name)};
+            } else {
+              widget.channel['poster'] = {'id': id, 'name': f.name, 'mime': _imgMime(f.name)};
+            }
+          });
+          toast(context, banner ? 'Banner updated' : 'Channel logo updated');
+        }
+      }
+    } on ApiException catch (e) {
+      if (mounted) toast(context, e.message);
+    }
+    if (mounted) setState(() => upArt = false);
+  }
 
   Future<void> save() async {
     if (busy) return;
@@ -576,6 +868,47 @@ class _ChannelSettingsPageState extends State<ChannelSettingsPage> {
   Widget build(BuildContext context) => Scaffold(
         appBar: AppBar(title: const Text('Channel settings')),
         body: ListView(padding: const EdgeInsets.all(20), children: [
+          // Artwork row — logo + banner pickers (mock2/mock4)
+          Row(children: [
+            GestureDetector(
+              onTap: upArt ? null : () => pickArt(banner: false),
+              child: Stack(children: [
+                ChannelAvatar(fileId: _logoId, name: name.text, radius: 30),
+                const Positioned(right: 0, bottom: 0, child: CircleAvatar(radius: 11, backgroundColor: AppTheme.blue, child: Icon(Icons.edit, size: 12, color: Colors.white))),
+              ]),
+            ),
+            const SizedBox(width: 14),
+            Expanded(
+              child: GestureDetector(
+                onTap: upArt ? null : () => pickArt(banner: true),
+                child: Stack(children: [
+                  Container(
+                    height: 76,
+                    decoration: BoxDecoration(
+                      color: const Color(0xFF16181D),
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(color: Theme.of(context).dividerColor),
+                    ),
+                    child: _bannerId != null
+                        ? FutureBuilder<Uint8List?>(
+                            future: loadFileImage(_bannerId),
+                            builder: (_, s) => s.data != null
+                                ? ClipRRect(borderRadius: BorderRadius.circular(12), child: Image.memory(s.data!, fit: BoxFit.cover, width: double.infinity, height: 76, gaplessPlayback: true))
+                                : const Center(child: Icon(Icons.image_outlined, color: Colors.white24)),
+                          )
+                        : const Center(child: Icon(Icons.image_outlined, color: Colors.white24)),
+                  ),
+                  const Positioned(right: 8, bottom: 8, child: CircleAvatar(radius: 12, backgroundColor: AppTheme.blue, child: Icon(Icons.edit, size: 13, color: Colors.white))),
+                ]),
+              ),
+            ),
+          ]),
+          if (upArt) const Padding(padding: EdgeInsets.only(top: 10), child: LinearProgressIndicator(minHeight: 3)),
+          Padding(
+            padding: const EdgeInsets.only(top: 8),
+            child: Text('Tap the logo to change it · tap the banner to change it', textAlign: TextAlign.center, style: TextStyle(fontSize: 11, color: Colors.grey.shade600)),
+          ),
+          const SizedBox(height: 16),
           TextField(controller: name, decoration: const InputDecoration(labelText: 'Channel name', border: OutlineInputBorder())),
           const SizedBox(height: 12),
           TextField(controller: desc, maxLines: 3, decoration: const InputDecoration(labelText: 'Description', border: OutlineInputBorder())),
@@ -796,6 +1129,127 @@ class _VideoOptionsSheetState extends State<VideoOptionsSheet> {
         ),
         const SizedBox(height: 8),
       ]),
+    );
+  }
+}
+
+// =================================================================== analytics
+/// Owner channel analytics (mock4 "Analytics" button): totals, per-video
+/// performance and who watched what + when.
+class ChannelAnalyticsPage extends StatelessWidget {
+  final Map<String, dynamic> channel;
+  const ChannelAnalyticsPage({super.key, required this.channel});
+
+  Widget _card(String v, String label, Color c) => Expanded(
+        child: Container(
+          padding: const EdgeInsets.symmetric(vertical: 14),
+          decoration: BoxDecoration(color: c.withValues(alpha: 0.10), borderRadius: BorderRadius.circular(14)),
+          child: Column(children: [
+            Text(v, style: TextStyle(fontSize: 17, fontWeight: FontWeight.w800, color: c)),
+            const SizedBox(height: 2),
+            Text(label, style: TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: Colors.grey.shade600)),
+          ]),
+        ),
+      );
+
+  Future<void> _showWatchers(BuildContext context, String cid, ChanItem it) async {
+    showSheet(
+      context,
+      SafeArea(
+        child: Column(mainAxisSize: MainAxisSize.min, children: [
+          const Padding(padding: EdgeInsets.all(14), child: Text('Watch history', style: TextStyle(fontWeight: FontWeight.w800, fontSize: 15))),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(20, 0, 20, 8),
+            child: Text(it.title, maxLines: 2, overflow: TextOverflow.ellipsis, style: TextStyle(fontSize: 12.5, color: Colors.grey.shade600)),
+          ),
+          SizedBox(
+            height: 300,
+            width: double.infinity,
+            child: FutureBuilder<List<dynamic>>(
+              future: PipsApi.channelFileViews(cid, it.e.id),
+              builder: (_, s) {
+                if (s.connectionState != ConnectionState.done) return const Center(child: CircularProgressIndicator());
+                final list = s.data ?? [];
+                if (list.isEmpty) return const Center(child: Text('No plays recorded yet.', style: TextStyle(fontSize: 12.5)));
+                return ListView.builder(
+                  padding: const EdgeInsets.symmetric(horizontal: 20),
+                  itemCount: list.length,
+                  itemBuilder: (_, i) {
+                    final v = Map<String, dynamic>.from(list[i] as Map);
+                    final u = (v['user'] ?? '').toString();
+                    return Padding(
+                      padding: const EdgeInsets.symmetric(vertical: 4),
+                      child: Row(children: [
+                        AvatarTile(username: u, radius: 14),
+                        const SizedBox(width: 9),
+                        Expanded(child: Text(u.isEmpty ? 'guest' : '@$u', maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 12.5, fontWeight: FontWeight.w600))),
+                        Text(fmtDate(v['at']?.toString()), style: TextStyle(fontSize: 11, color: Colors.grey.shade600)),
+                      ]),
+                    );
+                  },
+                );
+              },
+            ),
+          ),
+          const SizedBox(height: 10),
+        ]),
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final cid = (channel['id'] ?? '').toString();
+    final name = (channel['name'] ?? '').toString();
+    return Scaffold(
+      appBar: AppBar(title: Text('Analytics — $name')),
+      body: FutureBuilder<Map<String, dynamic>>(
+        future: PipsApi.channelGet(cid),
+        builder: (_, s) {
+          if (s.connectionState != ConnectionState.done) return const SkeletonScreen();
+          if (s.hasError || s.data?['channel'] is! Map) return const EmptyState(icon: '⚠️', text: 'Could not load analytics.');
+          final ch = Map<String, dynamic>.from(s.data!['channel'] as Map);
+          final filesRaw = ch['files'] is List ? (ch['files'] as List).map((x) => Map<String, dynamic>.from(x as Map)).toList() : <Map<String, dynamic>>[];
+          final items = <ChanItem>[];
+          for (final f in filesRaw) {
+            final it = ChanItem.fromRaw(f);
+            if (it.e.id.isNotEmpty) items.add(it);
+          }
+          int views = 0, likes = 0;
+          for (final it in items) {
+            views += it.views;
+            likes += it.likes;
+          }
+          final subs = ch['subscribers'] is int ? ch['subscribers'] as int : 0;
+          final ranked = items.toList()..sort((a, b) => b.views.compareTo(a.views));
+          return ListView(padding: const EdgeInsets.all(12), children: [
+            Row(children: [
+              _card(fmtCompact(views), 'Total views', AppTheme.blue),
+              const SizedBox(width: 10),
+              _card(fmtCompact(likes), 'Total likes', AppTheme.green),
+            ]),
+            const SizedBox(height: 10),
+            Row(children: [
+              _card(fmtCompact(subs), 'Subscribers', AppTheme.purple),
+              const SizedBox(width: 10),
+              _card('${items.length}', 'Videos', AppTheme.orange),
+            ]),
+            const SizedBox(height: 14),
+            const Padding(padding: EdgeInsets.fromLTRB(4, 0, 4, 4), child: Text('Videos by views', style: TextStyle(fontWeight: FontWeight.w800, fontSize: 15))),
+            if (items.isEmpty)
+              const EmptyState(icon: '📼', text: 'No videos yet.'),
+            for (final it in ranked)
+              ListTile(
+                contentPadding: const EdgeInsets.symmetric(horizontal: 4),
+                leading: SizedBox(width: 100, height: 56, child: VideoThumb(thumbId: it.thumbId, durationMs: it.durationMs, fallbackBytes: it.e.size, radius: 8)),
+                title: Text(it.title, maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 13.5, fontWeight: FontWeight.w600)),
+                subtitle: Text('${fmtCompact(it.views)} views · ${fmtCompact(it.likes)} likes', style: const TextStyle(fontSize: 11.5)),
+                trailing: const Icon(Icons.chevron_right, size: 20, color: Colors.grey),
+                onTap: () => _showWatchers(context, cid, it),
+              ),
+          ]);
+        },
+      ),
     );
   }
 }
