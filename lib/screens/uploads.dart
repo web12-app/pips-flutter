@@ -118,6 +118,15 @@ Widget importCard(BuildContext context, ServerImport im, {VoidCallback? onRemove
         Text(im.name, maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 13)),
         const SizedBox(height: 2),
         Text(sub, maxLines: 1, overflow: TextOverflow.ellipsis, style: TextStyle(fontSize: 11, color: im.status == 'failed' ? AppTheme.red : Colors.grey)),
+        if (im.status == 'failed' && im.kind == 'youtube' && (im.error?.toLowerCase().contains('bot') ?? false))
+          Padding(
+            padding: const EdgeInsets.only(top: 4),
+            child: TextButton(
+              onPressed: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const YtConnectPage())),
+              style: TextButton.styleFrom(padding: EdgeInsets.zero, minimumSize: Size.zero),
+              child: const Text('Allow YouTube Cookies', style: TextStyle(fontWeight: FontWeight.w700, fontSize: 11.5, color: AppTheme.blue)),
+            ),
+          ),
       ])),
       if (im.active)
         const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2))
@@ -493,7 +502,7 @@ class _UploadSheetState extends State<UploadSheet> {
                     child: const Row(mainAxisSize: MainAxisSize.min, children: [
                       Icon(Icons.smart_toy, size: 14, color: AppTheme.blue),
                       SizedBox(width: 5),
-                      Text('Connect YouTube on this phone (auto cookies)', style: TextStyle(fontWeight: FontWeight.w700, fontSize: 12, color: AppTheme.blue)),
+                      Text('Allow YouTube Cookies (you pick the cookies.txt)', style: TextStyle(fontWeight: FontWeight.w700, fontSize: 12, color: AppTheme.blue)),
                     ]),
                   ),
                 ]),
