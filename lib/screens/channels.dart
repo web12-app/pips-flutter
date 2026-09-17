@@ -428,7 +428,7 @@ class _ChannelPageState extends State<ChannelPage> {
               width: 120,
               height: 68,
               child: Stack(children: [
-                VideoThumb(thumbId: it.thumbId, durationMs: it.durationMs, fallbackBytes: e.size, radius: 9),
+                VideoThumb(thumbId: it.thumbId, videoId: e.id, durationMs: it.durationMs, fallbackBytes: e.size, radius: 9),
                 if (it.locked)
                   Positioned(right: 4, top: 4, child: Container(padding: const EdgeInsets.all(3), decoration: BoxDecoration(color: Colors.black.withValues(alpha: 0.7), borderRadius: BorderRadius.circular(6)), child: const Icon(Icons.lock, size: 12, color: Colors.white))),
               ]),
@@ -1330,7 +1330,7 @@ class ChannelAnalyticsPage extends StatelessWidget {
             for (final it in ranked)
               ListTile(
                 contentPadding: const EdgeInsets.symmetric(horizontal: 4),
-                leading: SizedBox(width: 100, height: 56, child: VideoThumb(thumbId: it.thumbId, durationMs: it.durationMs, fallbackBytes: it.e.size, radius: 8)),
+                leading: SizedBox(width: 100, height: 56, child: VideoThumb(thumbId: it.thumbId, videoId: it.e.id, durationMs: it.durationMs, fallbackBytes: it.e.size, radius: 8)),
                 title: Text(it.title, maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 13.5, fontWeight: FontWeight.w600)),
                 subtitle: Text('${fmtCompact(it.views)} views · ${fmtCompact(it.likes)} likes', style: const TextStyle(fontSize: 11.5)),
                 trailing: const Icon(Icons.chevron_right, size: 20, color: Colors.grey),

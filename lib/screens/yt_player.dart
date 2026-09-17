@@ -633,7 +633,7 @@ class _ChannelVideoPageState extends State<ChannelVideoPage> with WidgetsBinding
           leading: SizedBox(
             width: 120,
             height: 68,
-            child: VideoThumb(thumbId: it.thumbId, durationMs: it.durationMs, fallbackBytes: it.e.size, radius: 8),
+            child: VideoThumb(thumbId: it.thumbId, videoId: it.e.id, durationMs: it.durationMs, fallbackBytes: it.e.size, radius: 8),
           ),
           title: Text(it.title, maxLines: 2, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 13.5, fontWeight: FontWeight.w600)),
           subtitle: Row(children: [

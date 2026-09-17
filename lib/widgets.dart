@@ -1,5 +1,7 @@
+import 'dart:async';
 import 'dart:typed_data';
 import 'package:flutter/material.dart';
+import 'package:video_thumbnail/video_thumbnail.dart';
 import 'api.dart';
 import 'models.dart';
 
@@ -475,17 +477,70 @@ String fmtCompact(int n) {
   return '$n';
 }
 
+// ------------------------------------------------- first-frame posters
+/// Videos added WITHOUT a poster (e.g. URL imports) get their FIRST FRAME
+/// pulled from the public view URL as an automatic poster. Results are
+/// cached for the whole session; extraction is capped at 2 concurrent jobs
+/// so a long feed never saturates the network.
+
+final Map<String, Uint8List?> _frameCache = {}; // videoId -> frame bytes (null = tried & failed)
+final Map<String, Future<Uint8List?>> _frameJobs = {}; // in-flight dedup
+final List<String> _frameWait = []; // FIFO waiting queue
+int _frameActive = 0;
+const int _kMaxFrameExtracts = 2;
+
+Future<Uint8List?> _firstFrame(String videoId) {
+  if (_frameCache.containsKey(videoId)) return Future.value(_frameCache[videoId]);
+  final running = _frameJobs[videoId];
+  if (running != null) return running;
+  final c = Completer<Uint8List?>();
+  _frameJobs[videoId] = c.future;
+  _frameWait.add(videoId);
+  _pumpFrames();
+  return c.future;
+}
+
+void _pumpFrames() {
+  while (_frameActive < _kMaxFrameExtracts && _frameWait.isNotEmpty) {
+    final id = _frameWait.removeAt(0);
+    final c = _frameJobs[id];
+    if (c == null) continue;
+    _frameActive++;
+    () async {
+      Uint8List? bytes;
+      try {
+        bytes = await VideoThumbnail.thumbnailData(
+          video: PipsApi.viewUrl(id),
+          imageFormat: ImageFormat.JPEG,
+          maxWidth: 640,
+          quality: 78,
+        );
+      } catch (_) {
+        bytes = null;
+      }
+      _frameCache[id] = bytes;
+      _frameJobs.remove(id);
+      _frameActive--;
+      if (!c.isCompleted) c.complete(bytes);
+      _pumpFrames();
+    }();
+  }
+}
+
 /// YouTube-style video thumbnail: cloud thumbnail image with a dark
 /// placeholder fallback, plus a duration badge (bottom-right) when known.
+/// When [videoId] is given and no thumb was set, the video's FIRST FRAME is
+/// extracted (cached) and shown as an automatic poster.
 /// Parent must give it a fixed size (AspectRatio / SizedBox).
 class VideoThumb extends StatelessWidget {
   final String? thumbId;
+  final String? videoId;
   final int durationMs;
 
   /// Shown in the badge when no duration is known (e.g. non-video files).
   final int? fallbackBytes;
   final double radius;
-  const VideoThumb({super.key, this.thumbId, this.durationMs = 0, this.fallbackBytes, this.radius = 12});
+  const VideoThumb({super.key, this.thumbId, this.videoId, this.durationMs = 0, this.fallbackBytes, this.radius = 12});
 
   String? get _badge {
     if (durationMs > 0) return fmtDurationMs(durationMs);
@@ -506,6 +561,17 @@ class VideoThumb extends StatelessWidget {
             builder: (_, s) {
               final img = s.data;
               if (img != null) return Image.memory(img, fit: BoxFit.cover, gaplessPlayback: true);
+              return const Center(child: Icon(Icons.play_arrow_rounded, color: Colors.white38, size: 42));
+            },
+          )
+        else if (videoId != null && videoId!.isNotEmpty)
+          FutureBuilder<Uint8List?>(
+            future: _firstFrame(videoId!),
+            builder: (_, s) {
+              final img = s.data;
+              if (img != null && img.isNotEmpty) {
+                return Image.memory(img, fit: BoxFit.cover, gaplessPlayback: true);
+              }
               return const Center(child: Icon(Icons.play_arrow_rounded, color: Colors.white38, size: 42));
             },
           )

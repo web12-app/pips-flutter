@@ -159,7 +159,7 @@ class _OverviewPageState extends State<OverviewPage> {
           // 16:9 thumbnail area (mock3) — real thumbnail + duration badge
           AspectRatio(
             aspectRatio: 16 / 9,
-            child: VideoThumb(thumbId: it.thumbId, durationMs: it.durationMs, fallbackBytes: it.e.size, radius: 14),
+            child: VideoThumb(thumbId: it.thumbId, videoId: it.e.id, durationMs: it.durationMs, fallbackBytes: it.e.size, radius: 14),
           ),
           const SizedBox(height: 9),
           Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
