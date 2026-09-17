@@ -27,6 +27,9 @@ jobs:
       - name: Install dependencies
         run: flutter pub get
 
+      - name: Patch video_thumbnail (Gradle 9 compat)
+        run: python3 tools/patch_video_thumbnail.py
+
       - name: Verify code
         run: flutter analyze --no-fatal-infos
 
