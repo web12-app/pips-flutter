@@ -83,9 +83,48 @@ jobs:
         run: cp build/app/outputs/flutter-apk/app-release.apk "pips-${{ github.ref_name }}.apk"
 
       - name: Publish GitHub Release
-        uses: softprops/action-gh-release@v2
-        with:
-          files: pips-*.apk
-          generate_release_notes: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          TAG: ${{ github.ref_name }}
+        timeout-minutes: 45
+        run: |
+          APK="pips-${TAG}.apk"
+          ls -la "$APK"
+          for attempt in 1 2 3; do
+            echo "== Upload attempt $attempt =="
+            RID=$(curl -sf -H "Authorization: token $GITHUB_TOKEN" "https://api.github.com/repos/$REPO/releases/tags/$TAG" | python3 -c "import json,sys; d=json.load(sys.stdin); print(d.get('id') or '')" || true)
+            if [ -z "$RID" ]; then
+              echo "creating release $TAG"
+              RID=$(curl -sf -X POST -H "Authorization: token $GITHUB_TOKEN" -H "Content-Type: application/json" \
+                "https://api.github.com/repos/$REPO/releases" \
+                -d "{\"tag_name\":\"$TAG\",\"name\":\"$TAG\",\"generate_release_notes\":true}" \
+                | python3 -c "import json,sys; d=json.load(sys.stdin); print(d.get('id') or '')" || true)
+            fi
+            if [ -z "$RID" ]; then echo "release id missing"; sleep 20; continue; fi
+            echo "release id: $RID"
+            # drop a stale asset with the same name (overwrite)
+            for AID in $(curl -sf -H "Authorization: token $GITHUB_TOKEN" "https://api.github.com/repos/$REPO/releases/$RID/assets" \
+              | python3 -c "
+import json,sys
+try:
+    for a in json.load(sys.stdin):
+        if a.get('name') == '$APK': print(a['id'])
+except Exception: pass"); do
+              echo "deleting stale asset $AID"
+              curl -sf -X DELETE -H "Authorization: token $GITHUB_TOKEN" "https://api.github.com/repos/$REPO/releases/assets/$AID" || true
+              sleep 2
+            done
+            UP=$(curl -s -o /tmp/up.json -w "%{http_code}" -X POST \
+              -H "Authorization: token $GITHUB_TOKEN" -H "Content-Type: application/octet-stream" \
+              --data-binary @"$APK" \
+              "https://uploads.github.com/repos/$REPO/releases/$RID/assets?name=$APK")
+            echo "upload http: $UP"
+            if [ "$UP" = "201" ]; then
+              python3 -c "import json; d=json.load(open('/tmp/up.json')); print('uploaded:', d.get('name'), d.get('size'), 'bytes')"
+              exit 0
+            fi
+            sleep 30
+          done
+          echo "asset upload failed after retries"
+          exit 1
