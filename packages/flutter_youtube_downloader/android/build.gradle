@@ -1,0 +1,38 @@
+group 'com.destinyed.flutter_youtube_downloader'
+version '1.0-SNAPSHOT'
+
+buildscript {
+    repositories {
+        google()
+        mavenCentral()
+    }
+    dependencies {
+        classpath 'com.android.tools.build:gradle:8.5.1'
+    }
+}
+
+rootProject.allprojects {
+    repositories {
+        google()
+        mavenCentral()
+        maven { url 'https://jitpack.io' }
+    }
+}
+
+apply plugin: 'com.android.library'
+
+android {
+    compileSdk flutter.compileSdkVersion
+    namespace 'com.destinyed.flutter_youtube_downloader'
+
+    defaultConfig {
+        minSdk flutter.minSdkVersion
+    }
+    lintOptions {
+        disable 'InvalidPackage'
+    }
+}
+
+dependencies {
+    implementation 'com.github.TeamNewPipe:NewPipeExtractor:v0.26.5'
+}
