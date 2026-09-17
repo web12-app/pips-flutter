@@ -98,7 +98,7 @@ class PipsApi {
 
   static Map<String, String> get _headers => {
         if (session != null && session!.isNotEmpty) 'Cookie': 'pips_session=$session',
-        'User-Agent': 'PipsApp/3.22 (Flutter)',
+        'User-Agent': 'PipsApp/3.23 (Flutter)',
       };
 
   static Map<String, String> get authHeaders => _headers;
