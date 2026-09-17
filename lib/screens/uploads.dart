@@ -3,6 +3,7 @@ import 'dart:io';
 import 'dart:math';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter_youtube_downloader/flutter_youtube_downloader.dart';
 import '../api.dart';
 import '../models.dart';
 import '../services/notifications.dart';
@@ -311,6 +312,7 @@ class _UploadSheetState extends State<UploadSheet> {
   final urlCtrl = TextEditingController();
   String vis = 'public', folder = '';
   bool busy = false;
+  bool extracting = false;
   bool started = false; // after Upload -> live progress view
 
   @override
@@ -415,6 +417,49 @@ class _UploadSheetState extends State<UploadSheet> {
     }
   }
 
+  /// On-device YouTube extraction via the vendored flutter_youtube_downloader
+  /// (NewPipe engine): resolves the watch link to a direct media URL, then
+  /// queues a plain server-side import of that URL — no cookies needed.
+  Future<void> extractAndImport() async {
+    final raw = urlCtrl.text.trim();
+    if (raw.isEmpty || extracting) return;
+    setState(() => extracting = true);
+    try {
+      final res = await FlutterYoutubeDownloader.extractYoutubeLink(raw, 18);
+      final direct = res is String ? res : '';
+      if (!direct.startsWith('http')) {
+        if (mounted) {
+          toast(context, direct.isEmpty
+              ? 'Could not extract a direct link for that video.'
+              : 'Extract failed: $direct');
+        }
+        return;
+      }
+      // The direct URL is an ordinary https link — the same server-side
+      // worker that imports normal URLs can fetch it without yt-dlp.
+      final entry = await PipsApi.importUrl(direct, vis: vis);
+      if (!mounted) return;
+      final st = entry['import_status'];
+      UploadQueue.instance.trackImport(ServerImport(
+        id: (entry['id'] ?? '').toString(),
+        name: (entry['name'] ?? 'YouTube video').toString(),
+        size: int.tryParse('${entry['size'] ?? 0}') ?? 0,
+        status: st is String && st.isNotEmpty ? st : 'importing',
+        error: entry['import_error'] is String ? entry['import_error'] as String : null,
+        kind: 'youtube',
+        url: raw,
+      ));
+      setState(() => urlCtrl.clear());
+      if (mounted) toast(context, 'Direct link extracted — import queued. Safe to close the app.');
+    } on ApiException catch (e) {
+      if (mounted) toast(context, e.message);
+    } catch (_) {
+      if (mounted) toast(context, 'Extraction failed — try the server import instead.');
+    } finally {
+      if (mounted) setState(() => extracting = false);
+    }
+  }
+
   void upload() {
     final ready = items.where((e) => e.path.isNotEmpty).toList();
     if (ready.isEmpty) {
@@ -502,6 +547,22 @@ class _UploadSheetState extends State<UploadSheet> {
                   border: Border.all(color: AppTheme.blue.withValues(alpha: 0.25)),
                 ),
                 child: Column(children: [
+                  TextButton(
+                    onPressed: extracting ? null : extractAndImport,
+                    style: TextButton.styleFrom(padding: EdgeInsets.zero, minimumSize: Size.zero),
+                    child: Row(mainAxisSize: MainAxisSize.min, children: [
+                      if (extracting)
+                        const SizedBox(width: 14, height: 14, child: CircularProgressIndicator(strokeWidth: 2, color: AppTheme.purple))
+                      else
+                        const Icon(Icons.bolt, size: 14, color: AppTheme.purple),
+                      const SizedBox(width: 5),
+                      Text(
+                        extracting ? 'Extracting direct URL…' : 'Get direct URL & import (no cookies needed)',
+                        style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 12, color: AppTheme.purple),
+                      ),
+                    ]),
+                  ),
+                  const SizedBox(height: 4),
                   const Row(children: [
                     Icon(Icons.smart_display, size: 15, color: AppTheme.blue),
                     SizedBox(width: 8),

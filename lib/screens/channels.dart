@@ -4,6 +4,8 @@ import 'dart:math';
 import 'dart:typed_data';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter_youtube_downloader/flutter_youtube_downloader.dart';
+import 'package:http/http.dart' as http;
 import 'package:path_provider/path_provider.dart';
 import 'package:video_player/video_player.dart';
 import 'package:video_thumbnail/video_thumbnail.dart';
@@ -570,6 +572,8 @@ class _AddVideoSheetState extends State<AddVideoSheet> {
   Uint8List? thumbBytes;
   int durationMs = 0;
   bool prepping = false;
+  final ytLink = TextEditingController();
+  bool ytMode = false, fetchingLink = false;
 
   static String _videoMime(String name) {
     final n = name.toLowerCase();
@@ -614,6 +618,77 @@ class _AddVideoSheetState extends State<AddVideoSheet> {
       }
     } catch (_) {}
     if (mounted) setState(() => prepping = false);
+  }
+
+  /// flutter_youtube_downloader: extract the direct media URL for the pasted
+  /// YouTube link on-device (NewPipe engine), download it to a temp file, then
+  /// run the normal device-upload path (thumbnail + duration + channelAddFile).
+  Future<void> fetchYt() async {
+    if (fetchingLink) return;
+    var raw = ytLink.text.trim();
+    if (raw.isEmpty) {
+      setState(() => err = 'Paste a YouTube link first.');
+      return;
+    }
+    if (!raw.startsWith('http://') && !raw.startsWith('https://')) raw = 'https://$raw';
+    setState(() {
+      fetchingLink = true;
+      err = null;
+      prog = 0;
+      status = 'Extracting direct link…';
+    });
+    try {
+      final res = await FlutterYoutubeDownloader.extractYoutubeLink(raw, 18);
+      final direct = res is String ? res : '';
+      if (!direct.startsWith('http')) {
+        throw ApiException(direct.isEmpty
+            ? 'Could not extract a direct link for that video.'
+            : 'Extract failed: $direct', 0);
+      }
+      if (mounted) setState(() => status = 'Downloading video (360p mp4)…');
+      final dir = await getTemporaryDirectory();
+      final fname = 'yt_${DateTime.now().millisecondsSinceEpoch}.mp4';
+      final f = File('${dir.path}/$fname');
+      final client = http.Client();
+      try {
+        final resp = await client.send(http.Request('GET', Uri.parse(direct))).timeout(const Duration(seconds: 60));
+        if (resp.statusCode >= 400) {
+          throw ApiException('Direct link fetch failed (HTTP ${resp.statusCode}).', 0);
+        }
+        final total = resp.contentLength;
+        var got = 0;
+        final sink = f.openWrite();
+        await for (final chunk in resp.stream) {
+          got += chunk.length;
+          if (mounted && total != null && total > 0) setState(() => prog = got / total);
+          sink.add(chunk);
+        }
+        await sink.close();
+      } finally {
+        client.close();
+      }
+      final size = await f.length();
+      if (!mounted) return;
+      setState(() {
+        picked = f;
+        pickedName = fname;
+        pickedSize = size;
+        manual = false;
+        ytMode = false;
+        if (title.text.isEmpty) title.text = 'YouTube video';
+        prog = 0;
+        status = '';
+      });
+      unawaited(_prepare(f.path));
+    } on ApiException catch (e) {
+      if (mounted) setState(() => err = e.message);
+    } catch (_) {
+      if (mounted) {
+        setState(() => err = 'Extraction failed — try "Add existing file by ID" or the server import instead.');
+      }
+    } finally {
+      if (mounted) setState(() => fetchingLink = false);
+    }
   }
 
   Future<void> submit() async {
@@ -682,7 +757,32 @@ class _AddVideoSheetState extends State<AddVideoSheet> {
             const SizedBox(height: 12),
             if (!manual && picked == null) ...[
               SheetTile(icon: Icons.video_library_rounded, color: AppTheme.blue, label: 'Choose video from device', onTap: pick),
-              SheetTile(icon: Icons.tag, color: AppTheme.purple, label: 'Add existing file by ID', onTap: () => setState(() => manual = true)),
+              SheetTile(icon: Icons.tag, color: AppTheme.purple, label: 'Add existing file by ID', onTap: () => setState(() { manual = true; ytMode = false; })),
+              SheetTile(icon: Icons.smart_display_outlined, color: AppTheme.teal, label: 'From YouTube link (auto-upload)', onTap: () => setState(() => ytMode = !ytMode)),
+              if (ytMode) ...[
+                const SizedBox(height: 4),
+                TextField(
+                  controller: ytLink,
+                  keyboardType: TextInputType.url,
+                  decoration: const InputDecoration(labelText: 'YouTube link', hintText: 'youtube.com/watch?v=…', prefixIcon: Icon(Icons.link, size: 19), border: OutlineInputBorder()),
+                ),
+                const SizedBox(height: 8),
+                if (fetchingLink) ...[
+                  ProgressBar(value: prog),
+                  const SizedBox(height: 4),
+                  Text(status, style: const TextStyle(fontSize: 11)),
+                ],
+                SizedBox(
+                  width: double.infinity,
+                  child: OutlinedButton.icon(
+                    onPressed: fetchingLink ? null : fetchYt,
+                    icon: fetchingLink
+                        ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2))
+                        : const Icon(Icons.download_rounded, size: 17),
+                    label: Text(fetchingLink ? 'Fetching video…' : 'Get direct URL & add', style: const TextStyle(fontWeight: FontWeight.w700)),
+                  ),
+                ),
+              ],
             ] else ...[
               if (manual && picked == null) ...[
                 TextField(controller: manualId, decoration: const InputDecoration(labelText: 'File ID', border: OutlineInputBorder())),
