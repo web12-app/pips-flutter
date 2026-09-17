@@ -8,6 +8,7 @@ import '../models.dart';
 import '../services/notifications.dart';
 import '../widgets.dart';
 import 'yt_connect_page.dart';
+import 'yt_local_page.dart';
 
 class UploadQueue extends ChangeNotifier {
   static final instance = UploadQueue._();
@@ -90,7 +91,10 @@ class ServerImport {
   int size;
   String status; // importing | done | failed
   String? error;
-  ServerImport({required this.id, required this.name, required this.size, required this.status, this.error, this.kind = 'url'});
+
+  /// Source URL (for YouTube imports — used by "Download on this phone").
+  final String? url;
+  ServerImport({required this.id, required this.name, required this.size, required this.status, this.error, this.kind = 'url', this.url});
   bool get active => status == 'importing';
 }
 
@@ -118,14 +122,23 @@ Widget importCard(BuildContext context, ServerImport im, {VoidCallback? onRemove
         Text(im.name, maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 13)),
         const SizedBox(height: 2),
         Text(sub, maxLines: 1, overflow: TextOverflow.ellipsis, style: TextStyle(fontSize: 11, color: im.status == 'failed' ? AppTheme.red : Colors.grey)),
-        if (im.status == 'failed' && im.kind == 'youtube' && (im.error?.toLowerCase().contains('bot') ?? false))
+        if (im.kind == 'youtube' && (im.status == 'failed' || im.status == 'importing'))
           Padding(
             padding: const EdgeInsets.only(top: 4),
-            child: TextButton(
-              onPressed: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const YtConnectPage())),
-              style: TextButton.styleFrom(padding: EdgeInsets.zero, minimumSize: Size.zero),
-              child: const Text('Allow YouTube Cookies', style: TextStyle(fontWeight: FontWeight.w700, fontSize: 11.5, color: AppTheme.blue)),
-            ),
+            child: Row(mainAxisSize: MainAxisSize.min, children: [
+              if (im.status == 'failed' && (im.error?.toLowerCase().contains('bot') ?? false))
+                TextButton(
+                  onPressed: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const YtConnectPage())),
+                  style: TextButton.styleFrom(padding: EdgeInsets.zero, minimumSize: Size.zero),
+                  child: const Text('Allow YouTube Cookies', style: TextStyle(fontWeight: FontWeight.w700, fontSize: 11.5, color: AppTheme.blue)),
+                ),
+              if ((im.url ?? '').isNotEmpty)
+                TextButton(
+                  onPressed: () => Navigator.push(context, MaterialPageRoute(builder: (_) => YtLocalPage(initialUrl: im.url))),
+                  style: TextButton.styleFrom(padding: EdgeInsets.zero, minimumSize: Size.zero),
+                  child: const Text('Download on this phone', style: TextStyle(fontWeight: FontWeight.w700, fontSize: 11.5, color: AppTheme.teal)),
+                ),
+            ]),
           ),
       ])),
       if (im.active)
@@ -387,6 +400,7 @@ class _UploadSheetState extends State<UploadSheet> {
         status: st is String && st.isNotEmpty ? st : 'importing',
         error: entry['import_error'] is String ? entry['import_error'] as String : null,
         kind: isYt ? 'youtube' : 'url',
+        url: isYt ? raw : null,
       ));
       setState(() => urlCtrl.clear());
       toast(context, isYt
@@ -498,7 +512,17 @@ class _UploadSheetState extends State<UploadSheet> {
                   ]),
                   const SizedBox(height: 6),
                   TextButton(
+                    onPressed: () => Navigator.push(context, MaterialPageRoute(builder: (_) => YtLocalPage(initialUrl: urlCtrl.text.trim()))),
+                    style: TextButton.styleFrom(padding: EdgeInsets.zero, minimumSize: Size.zero),
+                    child: const Row(mainAxisSize: MainAxisSize.min, children: [
+                      Icon(Icons.phone_android, size: 14, color: AppTheme.teal),
+                      SizedBox(width: 5),
+                      Text('Download on this phone (live JSON)', style: TextStyle(fontWeight: FontWeight.w700, fontSize: 12, color: AppTheme.teal)),
+                    ]),
+                  ),
+                  TextButton(
                     onPressed: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const YtConnectPage())),
+                    style: TextButton.styleFrom(padding: EdgeInsets.zero, minimumSize: Size.zero),
                     child: const Row(mainAxisSize: MainAxisSize.min, children: [
                       Icon(Icons.smart_toy, size: 14, color: AppTheme.blue),
                       SizedBox(width: 5),

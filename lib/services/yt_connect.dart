@@ -10,7 +10,9 @@ import '../api.dart';
 class PickedCookieFile {
   final String name;
   final int size;
-  final Future<String> read;
+
+  /// Lazily reads the content (only when it is about to be uploaded).
+  final Future<String> Function() read;
   PickedCookieFile(this.name, this.size, this.read);
 }
 
@@ -44,9 +46,9 @@ class YtConnect {
       type: FileType.custom,
       allowedExtensions: const ['txt'],
     );
-    final f = result?.files?.first;
+    final f = result?.files.first;
     if (f == null) return null;
-    final size = (f.size is int) ? f.size as int : 0;
+    final size = f.size;
     if (f.path != null) {
       final path = f.path!;
       return PickedCookieFile(f.name, size, () => File(path).readAsString());

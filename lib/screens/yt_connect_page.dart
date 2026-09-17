@@ -155,7 +155,7 @@ class _YtConnectPageState extends State<YtConnectPage> {
                       Text('${(f.size / 1024).toStringAsFixed(1)} KB',
                           style: const TextStyle(fontSize: 11, color: Colors.grey)),
                     const SizedBox(width: 6),
-                    TextButton(onTap: _pick, child: const Text('Change', style: TextStyle(color: AppTheme.blue, fontSize: 12))),
+                    TextButton(onPressed: _pick, child: const Text('Change', style: TextStyle(color: AppTheme.blue, fontSize: 12))),
                   ]),
           ),
         ),
