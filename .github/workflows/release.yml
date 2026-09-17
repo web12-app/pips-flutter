@@ -6,6 +6,11 @@ on:
       - 'v*'
   workflow_dispatch:
 
+# A force-moved tag must not leave zombie builds racing — the newest run wins
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   build:
     runs-on: ubuntu-22.04
@@ -21,10 +26,24 @@ jobs:
           path: |
             ~/.gradle/caches
             ~/.gradle/wrapper
-          key: gradle-v2-${{ runner.os }}-${{ hashFiles('pubspec.lock', 'android/**', '.github/workflows/release.yml') }}
+          # NOTE: pubspec.lock is intentionally NOT in the key — the version
+          # bump on every release changes the lock file hash, which used to
+          # invalidate the cache and force a ~1h cold rebuild of the heavy
+          # native packages (ffmpeg-kit etc). Packages are now built ONCE on
+          # the first tag and every next tag build reuses them (fast).
+          key: gradle-v3-${{ runner.os }}-${{ hashFiles('android/**', '.github/workflows/release.yml') }}
           restore-keys: |
+            gradle-v3-${{ runner.os }}-
             gradle-v2-${{ runner.os }}-
             gradle-${{ runner.os }}-
+
+      - name: Cache pub packages
+        uses: actions/cache@v4
+        with:
+          path: ~/.pub-cache
+          key: pub-v1-${{ runner.os }}-${{ hashFiles('pubspec.lock') }}
+          restore-keys: |
+            pub-v1-${{ runner.os }}-
 
       - uses: actions/setup-java@v4
         with:
