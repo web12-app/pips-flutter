@@ -51,6 +51,9 @@ android {
     buildTypes {
         release {
             signingConfig = signingConfigs.getByName("release")
+            // Rhino (NewPipeExtractor) references java.beans.* — desktop-only
+            // JDK classes absent on Android; keep R8 from failing on them.
+            proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
         }
     }
 }
