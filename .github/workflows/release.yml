@@ -9,10 +9,21 @@ on:
 jobs:
   build:
     runs-on: ubuntu-22.04
+    timeout-minutes: 45
     permissions:
       contents: write
     steps:
       - uses: actions/checkout@v4
+
+      - name: Cache Gradle
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+          key: gradle-${{ runner.os }}-${{ hashFiles('pubspec.lock', 'android/**', '.github/workflows/release.yml') }}
+          restore-keys: |
+            gradle-${{ runner.os }}-
 
       - uses: actions/setup-java@v4
         with:
