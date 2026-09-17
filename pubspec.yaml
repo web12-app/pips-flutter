@@ -1,7 +1,7 @@
 name: pips
 description: Pips Cloud — cloud storage, channels, chat and Pips DB (Flutter port).
 publish_to: 'none'
-version: 3.20.0+25
+version: 3.22.0+27
 
 environment:
   sdk: '>=3.0.0 <4.0.0'
@@ -20,6 +20,7 @@ dependencies:
   path_provider: ^2.1.2
   video_player: ^2.8.3
   video_thumbnail: ^0.5.3
+  yt_downloader: ^0.1.0
   url_launcher: ^6.2.5
   share_plus: ^10.0.0
   app_links: ^6.3.0
@@ -40,4 +41,3 @@ flutter:
     - assets/google_g.png
     - assets/github_mark.png
     - assets/github_mark_w.png
-    - assets/pips_local/

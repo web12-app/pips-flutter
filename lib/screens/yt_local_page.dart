@@ -1,22 +1,25 @@
 import 'dart:async';
+import 'dart:io';
 import 'dart:math';
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart' show Clipboard, ClipboardData;
+import 'package:path_provider/path_provider.dart';
+import 'package:yt_downloader/yt_downloader.dart';
 import '../api.dart';
 import '../models.dart';
-import '../services/local_yg.dart';
 import '../widgets.dart';
-import 'yt_connect_page.dart';
 import 'yt_webview.dart';
 
-/// "Download on this phone" — the local you-get pipeline:
+/// "Download on this phone" — the whole pipeline runs INSIDE the app,
+/// in the background, with zero manual steps:
 ///
-///   1. One-time setup (guided): ReTerminal's Alpine session runs
-///      assets/pips_local/server.py → 127.0.0.1:8787
-///   2. Paste a YouTube URL → /meta (title + qualities, live JSON)
-///   3. Pick a quality → /download → live JSON progress console
-///   4. /file/<id> streams the mp4 straight into the Pips cloud upload
-///      (chunked, existing API — no new server endpoints)
+///   1. Paste a YouTube URL  →  formats fetched automatically
+///   2. Pick a quality       →  download starts automatically (video+audio,
+///      merged in-app with ffmpeg) with a live JSON progress console
+///   3. When done            →  the file streams straight up to Pips cloud
+///      (auto-upload on by default, existing chunked upload API)
+///
+/// No terminal, no other app, no cookies — the video is fetched from this
+/// phone's own network, which normally clears YouTube's bot check.
 class YtLocalPage extends StatefulWidget {
   final String? initialUrl;
   const YtLocalPage({super.key, this.initialUrl});
@@ -25,208 +28,190 @@ class YtLocalPage extends StatefulWidget {
 }
 
 class _YtLocalPageState extends State<YtLocalPage> {
+  final _yt = YtDownloader();
   final _urlCtrl = TextEditingController();
-  Timer? _poll;
-  Timer? _jobPoll;
+  Timer? _debounce;
 
-  Map<String, dynamic>? _health;
-
-  Map<String, dynamic>? _meta;
+  VideoInfo? _info;
   bool _metaBusy = false;
   String? _metaErr;
+  bool _metaBot = false;
 
-  String? _itag;
+  DownloadFormat? _format;
 
-  String? _jobId;
-  Map<String, dynamic> _job = {};
   bool _downloading = false;
-  String? _jobErr;
-  bool _jobBot = false;
+  double _progress = 0;
+  String _phase = '';
+  int _localSize = 0;
+  String? _localPath;
+  String? _dlErr;
+  bool _dlBot = false;
 
+  bool _autoUpload = true;
+  String vis = 'private';
   bool _uploading = false;
   double _uploadPct = 0;
   String _uploadStatus = '';
-  String vis = 'private';
   bool _uploaded = false;
-
-  final SetupFileServer _files = SetupFileServer();
-  bool _filesOn = false;
-  bool _filesBusy = false;
 
   @override
   void initState() {
     super.initState();
-    _urlCtrl.text = widget.initialUrl ?? '';
-    _check();
-    _poll = Timer.periodic(const Duration(seconds: 3), (_) => _check());
+    final u = widget.initialUrl ?? '';
+    _urlCtrl.text = u;
+    _urlCtrl.addListener(_onUrlChanged);
+    if (u.isNotEmpty) _fetch();
   }
 
   @override
   void dispose() {
-    _poll?.cancel();
-    _jobPoll?.cancel();
-    _files.stop();
+    _debounce?.cancel();
+    _urlCtrl.removeListener(_onUrlChanged);
     _urlCtrl.dispose();
     super.dispose();
   }
 
-  bool get _online => _health != null;
-
-  Future<void> _check() async {
-    final h = await LocalYg.health();
-    if (!mounted) return;
-    final was = _online;
-    setState(() => _health = h);
-    if (!was && h != null) {
-      toast(context, 'Local you-get server is online ✓');
+  static bool isYouTube(String raw) {
+    final u = Uri.tryParse(raw.trim());
+    if (u == null) return false;
+    final h = u.host.toLowerCase();
+    if (h == 'youtu.be') return u.pathSegments.isNotEmpty;
+    if (h == 'youtube.com' || h.endsWith('.youtube.com')) {
+      return u.path.startsWith('/watch') ||
+          u.path.startsWith('/shorts/') ||
+          u.path.startsWith('/embed/') ||
+          u.path.startsWith('/live/');
     }
+    return false;
   }
 
-  // ------------------------------------------------ setup file server
-  Future<void> _toggleFiles() async {
-    if (_filesOn) {
-      await _files.stop();
-      if (mounted) setState(() => _filesOn = false);
-      return;
-    }
-    setState(() => _filesBusy = true);
-    try {
-      await _files.start();
-      if (mounted) setState(() => _filesOn = true);
-    } catch (e) {
-      if (mounted) toast(context, 'Could not start the file server: $e');
-    } finally {
-      if (mounted) setState(() => _filesBusy = false);
-    }
+  void _onUrlChanged() {
+    _debounce?.cancel();
+    final url = _urlCtrl.text.trim();
+    if (url.isEmpty || !isYouTube(url)) return;
+    _debounce = Timer(const Duration(milliseconds: 700), _fetch);
   }
 
-  Future<void> _copy(String text, String what) async {
-    await Clipboard.setData(ClipboardData(text: text));
-    if (mounted) toast(context, '$what copied — paste it in ReTerminal');
-  }
-
-  static const _setupCmds = [
-    'wget -O /tmp/pips_yg_server.py http://127.0.0.1:8788/server.py',
-    'wget -O /tmp/pips-yg-setup.sh http://127.0.0.1:8788/setup.sh',
-    'sh /tmp/pips-yg-setup.sh',
-  ];
-
-  // ------------------------------------------------ meta / download / job
-  Future<void> _fetchMeta() async {
-    var url = _urlCtrl.text.trim();
+  // ------------------------------------------------ metadata
+  Future<void> _fetch() async {
+    final url = _urlCtrl.text.trim();
     if (url.isEmpty) return;
-    if (!url.startsWith('http://') && !url.startsWith('https://')) url = 'https://$url';
     setState(() {
       _metaBusy = true;
-      _meta = null;
       _metaErr = null;
-      _itag = null;
-      _jobId = null;
-      _job = {};
-      _jobErr = null;
+      _metaBot = false;
+      _format = null;
+      _info = null;
+      _localPath = null;
+      _uploaded = false;
+      _dlErr = null;
     });
     try {
-      final m = await LocalYg.meta(url);
+      final info = await _yt.getInfo(url);
       if (!mounted) return;
       setState(() {
-        _meta = m;
-        _itag = null;
+        _info = info;
+        _metaBusy = false;
       });
-    } on LocalYgError catch (e) {
-      if (mounted) setState(() => _metaErr = e.message);
     } catch (e) {
-      if (mounted) setState(() => _metaErr = '$e');
-    } finally {
-      if (mounted) setState(() => _metaBusy = false);
+      if (!mounted) return;
+      final msg = e.toString();
+      setState(() {
+        _metaBusy = false;
+        _metaErr = msg.length > 220 ? '${msg.substring(0, 220)}…' : msg;
+        _metaBot = msg
+                .toLowerCase()
+                .contains('sign in') ||
+            msg.toLowerCase().contains('not a bot') ||
+            msg.toLowerCase().contains('login_required') ||
+            msg.toLowerCase().contains('bot');
+      });
     }
   }
 
-  void _startJob() {
-    final itag = _itag;
-    final url = _urlCtrl.text.trim();
-    if (itag == null || itag.isEmpty) return;
+  // ------------------------------------------------ download
+  Future<void> _download() async {
+    final info = _info;
+    final format = _format;
+    if (info == null || format == null) return;
     setState(() {
       _downloading = true;
-      _jobErr = null;
-      _jobBot = false;
-      _job = {'status': 'starting', 'tail': 'starting you-get …', 'log': <String>[]};
-    });
-    _jobPoll?.cancel();
-    _jobPoll = Timer.periodic(const Duration(seconds: 1), (_) => _pollJob());
-    _begin(url, itag);
-  }
-
-  Future<void> _begin(String url, String itag) async {
-    try {
-      final id = await LocalYg.download(url, itag);
-      if (!mounted) return;
-      setState(() => _jobId = id);
-    } on LocalYgError catch (e) {
-      if (!mounted) return;
-      _jobPoll?.cancel();
-      setState(() {
-        _downloading = false;
-        _jobErr = e.message;
-        _jobBot = e.botCheck;
-      });
-    }
-  }
-
-  Future<void> _pollJob() async {
-    final id = _jobId;
-    if (id == null) return;
-    try {
-      final j = await LocalYg.job(id);
-      if (!mounted) return;
-      final st = (j['status'] ?? '').toString();
-      setState(() => _job = j);
-      if (st != 'running') {
-        _jobPoll?.cancel();
-        _jobPoll = null;
-        setState(() => _downloading = false);
-        if (st == 'error') {
-          _jobBot = (j['bot_check'] == true) ||
-              ((j['tail'] ?? '').toString().toLowerCase().contains('bot'));
-        }
-      }
-    } catch (_) {
-      // transient loopback blip — keep polling
-    }
-  }
-
-  void _cancelJob() {
-    _jobPoll?.cancel();
-    _jobPoll = null;
-    setState(() {
-      _downloading = false;
-      _jobId = null;
-      _job = {};
-      _jobErr = null;
+      _progress = 0;
+      _phase = 'starting…';
+      _dlErr = null;
+      _dlBot = false;
+      _localPath = null;
       _uploaded = false;
       _uploading = false;
       _uploadPct = 0;
     });
-    _check();
+    String? path;
+    try {
+      final dir = await getTemporaryDirectory();
+      path = '${dir.path}/pips-${info.videoId}.mp4';
+      await info.download(
+        format: format,
+        outputPath: path,
+        onProgress: (p) {
+          if (!mounted) return;
+          setState(() {
+            _progress = p;
+            _phase = format.needsMerge
+                ? (p < 0.45
+                    ? 'video stream'
+                    : p < 0.9
+                        ? 'audio stream'
+                        : 'merging (ffmpeg)')
+                : 'video stream';
+          });
+        },
+      );
+      if (!mounted) return;
+      final size = (await File(path).length());
+      setState(() {
+        _downloading = false;
+        _localPath = path;
+        _localSize = size;
+        _progress = 1;
+        _phase = 'done';
+      });
+      if (_autoUpload) await _upload();
+    } catch (e) {
+      try {
+        if (path != null) await File(path).delete();
+      } catch (_) {}
+      if (!mounted) return;
+      final msg = e.toString();
+      setState(() {
+        _downloading = false;
+        _dlErr = msg.length > 260 ? '${msg.substring(0, 260)}…' : msg;
+        _dlBot = msg
+                .toLowerCase()
+                .contains('sign in') ||
+            msg.toLowerCase().contains('not a bot') ||
+            msg.toLowerCase().contains('http 403') ||
+            msg.toLowerCase().contains('http 400');
+      });
+    }
   }
 
-  /// Video title, shown as-is…
-  String get _title {
-    final t = (_meta?['title'] ?? '').toString();
-    return t.isEmpty ? 'video' : t;
-  }
-
-  /// …and a filesystem-safe form for the cloud folder name.
+  // ------------------------------------------------ upload to cloud
   String get _safeTitle {
-    var t = _title.trim();
-    t = t.replaceAll(RegExp(r'[\\/:*?"<>|\x00-\x1f]'), ' ').replaceAll(RegExp(r'\s+'), ' ').trim();
+    var t = (_info?.title ?? 'video').trim();
+    t = t
+        .replaceAll(RegExp(r'[\\/:*?"<>|\x00-\x1f]'), ' ')
+        .replaceAll(RegExp(r'\s+'), ' ')
+        .trim();
     if (t.length > 80) t = t.substring(0, 80).trim();
     return t.isEmpty ? 'video' : t;
   }
 
-  // ------------------------------------------------ upload to cloud
   Future<void> _upload() async {
-    final id = _jobId;
-    if (id == null || (_job['status'] ?? '') != 'done') return;
+    final path = _localPath;
+    if (path == null) return;
+    final f = File(path);
+    final size = await f.length();
+    if (size <= 0) return;
     const name = 'video.mp4';
     final folder = 'YouTube/$_safeTitle';
     setState(() {
@@ -234,30 +219,24 @@ class _YtLocalPageState extends State<YtLocalPage> {
       _uploadPct = 0;
       _uploadStatus = 'Preparing upload…';
     });
-    LocalFileStream? fs;
     var ok = false;
     String? err;
     try {
-      // Open the local file stream first: its Content-Length is the true
-      // on-disk size, so the chunk plan matches exactly.
-      final stream = await LocalYg.file(id);
-      fs = stream;
-      final size = stream.size;
-      if (size <= 0) throw LocalYgError('file is empty');
       try {
         await PipsApi.createFolder(folder);
       } catch (_) {}
       final init = await PipsApi.uploadInit(name, size);
       final uid = init['id'].toString();
       final total = (size + PipsApi.chunkSize - 1) ~/ PipsApi.chunkSize;
+      final bytes = await f.readAsBytes();
       for (var i = 0; i < total; i++) {
         final want = min(PipsApi.chunkSize, size - i * PipsApi.chunkSize);
-        final part = await stream.nextBytes(want);
-        await PipsApi.uploadChunk(uid, i, part);
+        await PipsApi.uploadChunk(uid, i, bytes.sublist(i * PipsApi.chunkSize, i * PipsApi.chunkSize + want));
         if (!mounted) return;
+        final sent = min((i + 1) * PipsApi.chunkSize, size);
         setState(() {
-          _uploadPct = stream.progress;
-          _uploadStatus = 'Uploading to Pips cloud… ${_fmtBytes(stream.read)} / ${_fmtBytes(size)}';
+          _uploadPct = (i + 1) / total;
+          _uploadStatus = 'Uploading to Pips cloud… ${_fmtBytes(sent)} / ${_fmtBytes(size)}';
         });
       }
       await PipsApi.uploadFinish(uid, total, size, name, 'video/mp4', vis);
@@ -266,8 +245,6 @@ class _YtLocalPageState extends State<YtLocalPage> {
       err = e.message;
     } catch (e) {
       err = '$e';
-    } finally {
-      await fs?.close();
     }
     if (!mounted) return;
     setState(() {
@@ -287,6 +264,8 @@ class _YtLocalPageState extends State<YtLocalPage> {
   @override
   Widget build(BuildContext context) {
     final hc = HomeColors.of(context);
+    final info = _info;
+    final done = _localPath != null;
     return Scaffold(
       backgroundColor: hc.surface,
       appBar: AppBar(
@@ -302,196 +281,16 @@ class _YtLocalPageState extends State<YtLocalPage> {
       body: ListView(
         padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
         children: [
-          _statusCard(),
-          if (!_online) ...[
+          _urlCard(),
+          if (_metaBusy || _metaErr != null || info != null) ...[
             const SizedBox(height: 12),
-            _setupCard(),
-          ] else ...[
+            _metaCard(),
+          ],
+          if (_downloading || done || _dlErr != null) ...[
             const SizedBox(height: 12),
-            _urlCard(),
-            if (_meta != null || _metaBusy || _metaErr != null) ...[
-              const SizedBox(height: 12),
-              _metaCard(),
-            ],
-            if (_jobId != null || _downloading || _jobErr != null) ...[
-              const SizedBox(height: 12),
-              _jobCard(),
-            ],
+            _jobCard(),
           ],
         ],
-      ),
-    );
-  }
-
-  Widget _statusCard() {
-    final h = _health;
-    final online = h != null;
-    final ffmpeg = h?['ffmpeg'] == true;
-    final cookies = h?['cookies'] == true;
-    final yg = (h?['you_get'] ?? '').toString();
-    final ygVer = yg.contains('version') ? (yg.split('version').last.trim().split('\n').first) : (yg.isEmpty ? '…' : yg);
-    return Container(
-      padding: const EdgeInsets.all(14),
-      decoration: BoxDecoration(
-        color: (online ? AppTheme.green : const Color(0xFF64748B)).withValues(alpha: 0.07),
-        borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: (online ? AppTheme.green : const Color(0xFF94A3B8)).withValues(alpha: 0.35)),
-      ),
-      child: Row(children: [
-        Container(
-          width: 40, height: 40,
-          decoration: BoxDecoration(
-            color: (online ? AppTheme.green : const Color(0xFF94A3B8)).withValues(alpha: 0.15),
-            shape: BoxShape.circle,
-          ),
-          child: Icon(online ? Icons.cloud_done : Icons.cloud_off, size: 21,
-              color: online ? AppTheme.green : const Color(0xFF64748B)),
-        ),
-        const SizedBox(width: 12),
-        Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          Text(online ? 'Local you-get server: ONLINE' : 'Local you-get server: OFFLINE',
-              style: TextStyle(fontWeight: FontWeight.w800, fontSize: 14,
-                  color: online ? AppTheme.green : const Color(0xFF475569))),
-          const SizedBox(height: 2),
-          Text(online
-              ? 'you-get $ygVer · python ${(h['python'] ?? '').toString()} · ffmpeg ${ffmpeg ? '✓' : '✗ (mp4-only qualities work)'}${cookies ? ' · cookies ✓' : ''}'
-              : 'Set it up once in ReTerminal (Alpine) — 3 commands, then every YouTube download runs on your own network.',
-              style: const TextStyle(fontSize: 11.5, color: Colors.grey, height: 1.3)),
-        ])),
-        if (!online)
-          FilledButton(
-            onPressed: _check,
-            style: FilledButton.styleFrom(
-              backgroundColor: AppTheme.blue, foregroundColor: Colors.white,
-              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-              minimumSize: Size.zero,
-            ),
-            child: const Text('Recheck', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700)),
-          ),
-      ]),
-    );
-  }
-
-  Widget _setupCard() {
-    return Container(
-      padding: const EdgeInsets.all(14),
-      decoration: BoxDecoration(
-        color: AppTheme.blue.withValues(alpha: 0.05),
-        borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: AppTheme.blue.withValues(alpha: 0.22)),
-      ),
-      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-        const Row(children: [
-          Icon(Icons.terminal, size: 19, color: AppTheme.blue),
-          SizedBox(width: 8),
-          Text('One-time setup (in ReTerminal)', style: TextStyle(fontWeight: FontWeight.w800, fontSize: 14)),
-        ]),
-        const SizedBox(height: 10),
-        _stepBtn(1, 'Open ReTerminal on this phone'),
-        const SizedBox(height: 10),
-        Row(children: [
-          Expanded(child: FilledButton.icon(
-            onPressed: openReTerminal,
-            style: FilledButton.styleFrom(
-              backgroundColor: AppTheme.blue, foregroundColor: Colors.white,
-              padding: const EdgeInsets.symmetric(vertical: 11),
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-            ),
-            icon: const Icon(Icons.rocket_launch, size: 17),
-            label: const Text('Open ReTerminal', style: TextStyle(fontWeight: FontWeight.w700)),
-          )),
-          const SizedBox(width: 10),
-          Expanded(child: OutlinedButton.icon(
-            onPressed: _filesBusy ? null : _toggleFiles,
-            style: OutlinedButton.styleFrom(
-              foregroundColor: _filesOn ? AppTheme.green : AppTheme.blue,
-              side: BorderSide(color: (_filesOn ? AppTheme.green : AppTheme.blue).withValues(alpha: 0.4)),
-              padding: const EdgeInsets.symmetric(vertical: 11),
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-            ),
-            icon: Icon(_filesOn ? Icons.wifi_tethering : Icons.wifi_off, size: 17),
-            label: Text(_filesOn ? 'Files: ON' : 'Serve setup files', style: const TextStyle(fontWeight: FontWeight.w700)),
-          )),
-        ]),
-        if (_filesOn)
-          Padding(
-            padding: const EdgeInsets.only(top: 8),
-            child: Text('File server running at ${SetupFileServer.url} — the commands below now work.',
-                style: const TextStyle(fontSize: 11.5, color: AppTheme.green, fontWeight: FontWeight.w600)),
-          ),
-        const SizedBox(height: 12),
-        _step(2, const Text('In ReTerminal, switch to the Alpine session, then run:')),
-        const SizedBox(height: 8),
-        ..._setupCmds.map((c) => _cmdRow(c)),
-        const SizedBox(height: 10),
-        Row(children: [
-          Expanded(child: OutlinedButton.icon(
-            onPressed: () => _copy(_setupCmds.join('\n'), 'Setup commands'),
-            style: OutlinedButton.styleFrom(
-              foregroundColor: AppTheme.blue,
-              side: BorderSide(color: AppTheme.blue.withValues(alpha: 0.4)),
-              padding: const EdgeInsets.symmetric(vertical: 10),
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-            ),
-            icon: const Icon(Icons.copy_all, size: 16),
-            label: const Text('Copy all commands', style: TextStyle(fontWeight: FontWeight.w700)),
-          )),
-        ]),
-        const SizedBox(height: 12),
-        _step(3, const Text('When the health check prints {"ok": true} — tap Recheck. The server stays up as long as ReTerminal does.')),
-        const SizedBox(height: 6),
-        const Text(
-          'Why: downloads then run on your home network instead of a data-centre, so YouTube normally does not bot-check them. Cookies are never read from any browser or app — only an optional cookies.txt you start the server with yourself.',
-          style: TextStyle(fontSize: 11, color: Colors.grey, height: 1.4),
-        ),
-      ]),
-    );
-  }
-
-  Widget _step(int n, Widget label) {
-    return Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
-      Container(
-        width: 20, height: 20,
-        decoration: const BoxDecoration(color: AppTheme.blue, shape: BoxShape.circle),
-        alignment: Alignment.center,
-        child: Text('$n', style: const TextStyle(color: Colors.white, fontSize: 11.5, fontWeight: FontWeight.w800)),
-      ),
-      const SizedBox(width: 8),
-      Expanded(child: Padding(
-        padding: const EdgeInsets.only(top: 0),
-        child: label,
-      )),
-    ]);
-  }
-
-  Widget _stepBtn(int n, String label) {
-    return Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
-      Container(
-        width: 20, height: 20,
-        decoration: const BoxDecoration(color: AppTheme.blue, shape: BoxShape.circle),
-        alignment: Alignment.center,
-        child: Text('$n', style: const TextStyle(color: Colors.white, fontSize: 11.5, fontWeight: FontWeight.w800)),
-      ),
-      const SizedBox(width: 8),
-      Expanded(child:        Text(label, style: const TextStyle(fontSize: 12.5, height: 1.35, fontWeight: FontWeight.w600))),
-    ]);
-  }
-
-  Widget _cmdRow(String cmd) {
-    return InkWell(
-      borderRadius: BorderRadius.circular(8),
-      onTap: () => _copy(cmd, 'Command'),
-      child: Container(
-        margin: const EdgeInsets.only(bottom: 6),
-        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
-        decoration: BoxDecoration(
-          color: const Color(0xFF0F172A),
-          borderRadius: BorderRadius.circular(8),
-        ),
-        child: Row(children: [
-          Expanded(child: Text(cmd, style: const TextStyle(fontFamily: 'monospace', fontSize: 11.5, color: Color(0xFF7DD3FC)))),
-          const Icon(Icons.copy, size: 13, color: Color(0xFF64748B)),
-        ]),
       ),
     );
   }
@@ -505,13 +304,13 @@ class _YtLocalPageState extends State<YtLocalPage> {
         border: Border.all(color: HomeColors.of(context).line),
       ),
       child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-        const Text('YouTube URL', style: TextStyle(fontWeight: FontWeight.w700, fontSize: 13)),
+        const Text('YouTube URL — details load automatically', style: TextStyle(fontWeight: FontWeight.w700, fontSize: 13)),
         const SizedBox(height: 8),
         TextField(
           controller: _urlCtrl,
           keyboardType: TextInputType.url,
           decoration: InputDecoration(
-            hintText: 'https://www.youtube.com/watch?v=…',
+            hintText: 'https://www.youtube.com/watch?v=…  or  youtu.be/…',
             isDense: true,
             prefixIcon: const Icon(Icons.link, size: 18),
             suffixIcon: Row(mainAxisSize: MainAxisSize.min, children: [
@@ -523,8 +322,8 @@ class _YtLocalPageState extends State<YtLocalPage> {
               ),
               const SizedBox(width: 4),
               TextButton(
-                onPressed: _metaBusy || _urlCtrl.text.trim().isEmpty ? null : _fetchMeta,
-                child: Text(_metaBusy ? '…' : 'Details', style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 12.5, color: AppTheme.blue)),
+                onPressed: _metaBusy || _urlCtrl.text.trim().isEmpty ? null : _fetch,
+                child: const Text('Refresh', style: TextStyle(fontWeight: FontWeight.w700, fontSize: 12.5, color: AppTheme.blue)),
               ),
               const SizedBox(width: 6),
             ]),
@@ -539,7 +338,7 @@ class _YtLocalPageState extends State<YtLocalPage> {
   }
 
   Widget _metaCard() {
-    final m = _meta;
+    final info = _info;
     return Container(
       padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
@@ -556,32 +355,40 @@ class _YtLocalPageState extends State<YtLocalPage> {
         if (_metaBusy)
           const Padding(
             padding: EdgeInsets.only(top: 10),
-            child: Row(children: [SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2)), SizedBox(width: 10), Text('Fetching with you-get…', style: TextStyle(fontSize: 12, color: Colors.grey))]),
+            child: Row(children: [SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2)), SizedBox(width: 10), Text('Fetching formats on this phone…', style: TextStyle(fontSize: 12, color: Colors.grey))]),
           )
-        else if (_metaErr != null)
+        else if (_metaErr != null) ...[
           Padding(
             padding: const EdgeInsets.only(top: 10),
-            child: Text(_metaErr!, style: const TextStyle(fontSize: 12.5, color: AppTheme.red)),
-          )
-        else if (m != null) ...[
+            child: Text(_metaErr!, style: const TextStyle(fontSize: 12.5, color: AppTheme.red, height: 1.35)),
+          ),
+          if (_metaBot) _botHint(),
+        ]
+        else if (info != null) ...[
           const SizedBox(height: 10),
-          Text((m['title'] ?? '').toString(), style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 14, height: 1.3)),
-          const SizedBox(height: 4),
-          Text('${(m['author'] ?? '').toString()} · ${_fmtDur(m['duration'])} · ${_fmtBytes(_num(m['size']))} total',
-              style: const TextStyle(fontSize: 11.5, color: Colors.grey)),
+          Text(info.title, style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 14, height: 1.3)),
           const SizedBox(height: 10),
-          const Text('Pick a quality', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700, color: Colors.grey)),
+          const Text('Pick a quality — download + upload run automatically', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700, color: Colors.grey)),
           const SizedBox(height: 6),
           Wrap(spacing: 8, runSpacing: 8, children: [
-            for (final it in (m['itags'] is List ? m['itags'] as List : <dynamic>[]))
-              if (it is Map)
-                _qualityChip(it, _itag == it['itag'].toString()),
+            for (final f in info.formats.videoWithAudio)
+              _qualityChip(f, _format == f),
           ]),
-          if (_itag != null)
+          const SizedBox(height: 10),
+          CheckboxListTile(
+            value: _autoUpload,
+            onChanged: (v) => setState(() => _autoUpload = v ?? true),
+            controlAffinity: ListTileControlAffinity.leading,
+            contentPadding: EdgeInsets.zero,
+            title: const Text('Auto upload to Pips cloud after download', style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.w600)),
+            activeColor: AppTheme.blue,
+          ),
+          if (_format != null)
             FilledButton.icon(
-              onPressed: _startJob,
+              onPressed: _downloading ? null : _download,
               style: FilledButton.styleFrom(
-                backgroundColor: AppTheme.blue, foregroundColor: Colors.white,
+                backgroundColor: AppTheme.blue,
+                foregroundColor: Colors.white,
                 padding: const EdgeInsets.symmetric(vertical: 13),
                 shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
               ),
@@ -593,14 +400,14 @@ class _YtLocalPageState extends State<YtLocalPage> {
     );
   }
 
-  Widget _qualityChip(Map it, bool sel) {
-    final itag = it['itag'].toString();
-    final h = _num(it['height']);
-    final label = (it['label'] ?? (h > 0 ? '${h}p' : itag)).toString();
-    final size = _num(it['size']);
-    final c = h >= 1080 ? AppTheme.blue : (h >= 480 ? AppTheme.teal : Colors.grey);
+  Widget _qualityChip(DownloadFormat f, bool sel) {
+    final c = (f.height ?? 0) >= 1080
+        ? AppTheme.blue
+        : (f.height ?? 0) >= 480
+            ? AppTheme.teal
+            : Colors.grey;
     return GestureDetector(
-      onTap: () => setState(() => _itag = itag),
+      onTap: () => setState(() => _format = f),
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 11, vertical: 7),
         decoration: BoxDecoration(
@@ -610,25 +417,21 @@ class _YtLocalPageState extends State<YtLocalPage> {
         ),
         child: Row(mainAxisSize: MainAxisSize.min, children: [
           if (sel) ...[const Icon(Icons.check, size: 13), const SizedBox(width: 4)],
-          Text(label, style: TextStyle(fontWeight: FontWeight.w700, fontSize: 12, color: sel ? c : const Color(0xFF334155))),
-          if (size > 0) ...[const SizedBox(width: 6), Text(_fmtBytes(size), style: const TextStyle(fontSize: 10.5, color: Colors.grey))],
+          Text(f.label, style: TextStyle(fontWeight: FontWeight.w700, fontSize: 12, color: sel ? c : const Color(0xFF334155))),
+          if (f.estimatedSize > 0) ...[
+            const SizedBox(width: 6),
+            Text(_fmtBytes(f.estimatedSize), style: const TextStyle(fontSize: 10.5, color: Colors.grey)),
+          ],
         ]),
       ),
     );
   }
 
   Widget _jobCard() {
-    final st = (_job['status'] ?? '').toString();
-    final done = st == 'done';
-    final failed = st == 'error' || _jobErr != null;
-    final pct = _num(_job['percent']).toDouble();
-    final mb = _num(_job['mb']).toDouble();
-    final mbps = _num(_job['mbps']).toDouble();
-    final secs = _num(_job['seconds']);
-    final tail = (_job['tail'] ?? '').toString();
-    final logLines = _job['log'] is List ? (_job['log'] as List).map((e) => e.toString()).toList() : <String>[];
-    final size = _num(_job['size']);
+    final done = _localPath != null;
+    final failed = _dlErr != null;
     final color = failed ? AppTheme.red : (done ? AppTheme.green : AppTheme.blue);
+    final est = _format?.estimatedSize ?? 0;
     return Container(
       padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
@@ -641,55 +444,33 @@ class _YtLocalPageState extends State<YtLocalPage> {
           Icon(failed ? Icons.error_outline : (done ? Icons.check_circle : Icons.downloading), size: 19, color: color),
           const SizedBox(width: 8),
           Expanded(child: Text(
-            _jobErr != null ? 'Download failed' : (done ? 'Download finished ✓' : 'Downloading on this phone…'),
+            _dlErr != null
+                ? 'Download failed'
+                : done
+                    ? 'Download finished ✓'
+                    : 'Downloading on this phone…',
             style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 14),
           )),
-          if (done) Text(_fmtBytes(size), style: const TextStyle(fontSize: 12, color: Colors.grey, fontWeight: FontWeight.w600)),
-          if (_downloading)
-            IconButton(icon: const Icon(Icons.close, size: 18, color: Colors.grey), tooltip: 'Stop', onPressed: _cancelJob),
+          if (done) Text(_fmtBytes(_localSize), style: const TextStyle(fontSize: 12, color: Colors.grey, fontWeight: FontWeight.w600)),
         ]),
-        if (_jobErr != null)
+        if (_dlErr != null) ...[
           Padding(
             padding: const EdgeInsets.only(top: 8),
-            child: Text(_jobErr!, style: const TextStyle(fontSize: 12.5, color: AppTheme.red, height: 1.35)),
+            child: Text(_dlErr!, style: const TextStyle(fontSize: 12.5, color: AppTheme.red, height: 1.35)),
           ),
-        if (_jobBot)
-          Container(
-            margin: const EdgeInsets.only(top: 10),
-            padding: const EdgeInsets.all(10),
-            decoration: BoxDecoration(
-              color: AppTheme.red.withValues(alpha: 0.06),
-              borderRadius: BorderRadius.circular(10),
-              border: Border.all(color: AppTheme.red.withValues(alpha: 0.3)),
-            ),
-            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-              const Row(children: [
-                Icon(Icons.shield, size: 15, color: AppTheme.red),
-                SizedBox(width: 7),
-                Text('YouTube bot-check', style: TextStyle(fontWeight: FontWeight.w800, fontSize: 12.5, color: AppTheme.red)),
-              ]),
-              const SizedBox(height: 5),
-              const Text('This video wants sign-in even from your network. Add your own cookies (you pick the file) and re-run the setup, or retry later from home Wi-Fi.',
-                  style: TextStyle(fontSize: 11.5, height: 1.35, color: Colors.grey)),
-              const SizedBox(height: 8),
-              TextButton(
-                onPressed: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const YtConnectPage())),
-                style: TextButton.styleFrom(padding: EdgeInsets.zero, minimumSize: Size.zero),
-                child: const Text('Allow YouTube Cookies', style: TextStyle(fontWeight: FontWeight.w700, fontSize: 12, color: AppTheme.blue)),
-              ),
-            ]),
-          ),
+          if (_dlBot) _botHint(),
+        ],
         if (!failed) ...[
           const SizedBox(height: 10),
-          ProgressBar(value: done ? 1 : (pct / 100).clamp(0, 1), color: color),
+          ProgressBar(value: done ? 1 : _progress.clamp(0, 1), color: color),
           const SizedBox(height: 8),
           Text(
             done
-                ? 'Ready to upload'
-                : '${pct.toStringAsFixed(0)}% · ${mb.toStringAsFixed(1)} MB${mbps > 0 ? ' · ${mbps.toStringAsFixed(2)} MB/s' : ''} · ${secs}s',
+                ? 'Ready for upload'
+                : '${(_progress * 100).toStringAsFixed(0)}% · ${_phase}${est > 0 ? ' · ${_fmtBytes((est * _progress).round())} / ${_fmtBytes(est)}' : ''}',
             style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: color),
           ),
-          if (tail.isNotEmpty)
+          if (!_downloading || done)
             Container(
               margin: const EdgeInsets.only(top: 10),
               padding: const EdgeInsets.all(10),
@@ -698,34 +479,26 @@ class _YtLocalPageState extends State<YtLocalPage> {
                 const Text('LIVE JSON', style: TextStyle(fontSize: 9.5, fontWeight: FontWeight.w800, color: Color(0xFF64748B), letterSpacing: 1)),
                 const SizedBox(height: 6),
                 SelectableText(
-                  _jobJson(),
+                  _liveJson(),
                   style: const TextStyle(fontFamily: 'monospace', fontSize: 10.5, height: 1.5, color: Color(0xFF86EFAC)),
                 ),
-                if (logLines.isNotEmpty) ...[
-                  const SizedBox(height: 8),
-                  const Text('LOG', style: TextStyle(fontSize: 9.5, fontWeight: FontWeight.w800, color: Color(0xFF64748B), letterSpacing: 1)),
-                  const SizedBox(height: 4),
-                  SelectableText(
-                    logLines.sublist(logLines.length > 8 ? logLines.length - 8 : 0).join('\n'),
-                    style: const TextStyle(fontFamily: 'monospace', fontSize: 10, height: 1.45, color: Color(0xFF7DD3FC)),
-                  ),
-                ],
               ]),
             ),
         ],
-        if (done && !failed) ...[
+        if (done) ...[
           const SizedBox(height: 12),
           Row(children: [
             Expanded(child: OutlinedButton.icon(
               icon: Icon(vis == 'public' ? Icons.public : Icons.lock, size: 16),
               label: Text(vis == 'public' ? 'Public' : 'Private', style: const TextStyle(fontSize: 12.5)),
-              onPressed: _uploaded ? null : () => setState(() => vis = vis == 'public' ? 'private' : 'public'),
+              onPressed: _uploaded || _uploading ? null : () => setState(() => vis = vis == 'public' ? 'private' : 'public'),
             )),
             const SizedBox(width: 10),
             Expanded(child: FilledButton.icon(
-              onPressed: _uploading || _uploaded ? null : _upload,
+              onPressed: _autoUpload || _uploading || _uploaded ? null : _upload,
               style: FilledButton.styleFrom(
-                backgroundColor: AppTheme.green, foregroundColor: Colors.white,
+                backgroundColor: AppTheme.green,
+                foregroundColor: Colors.white,
                 padding: const EdgeInsets.symmetric(vertical: 11),
                 shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
               ),
@@ -747,35 +520,42 @@ class _YtLocalPageState extends State<YtLocalPage> {
     );
   }
 
-  static int _num(dynamic v) => (v is num) ? v.toInt() : 0;
-
-  String _jobJson() {
-    final st = (_job['status'] ?? '').toString();
-    final pct = _num(_job['percent']).toString();
-    final mb = _num(_job['mb']).toString();
-    final mbps = _num(_job['mbps']).toString();
-    final secs = _num(_job['seconds']).toString();
-    final tail = (_job['tail'] ?? '').toString().replaceAll('"', '\\"');
-    final size = _num(_job['size']).toString();
-    return '{\n'
-        '  "job": "${_jobId ?? ''}",\n'
-        '  "status": "$st",\n'
-        '  "percent": $pct,\n'
-        '  "mb": $mb,\n'
-        '  "mbps": $mbps,\n'
-        '  "size_bytes": $size,\n'
-        '  "seconds": $secs,\n'
-        '  "tail": "$tail"\n'
-        '}';
-  }
-
-  String _fmtDur(dynamic d) {
-    final s = (d is num) ? d.toInt() : 0;
-    if (s <= 0) return '—';
-    final m = s ~/ 60, sec = s % 60;
-    final h = m ~/ 60;
-    return h > 0 ? '${h}h ${m % 60}m' : '${m}m ${sec}s';
+  Widget _botHint() {
+    return Container(
+      margin: const EdgeInsets.only(top: 10),
+      padding: const EdgeInsets.all(10),
+      decoration: BoxDecoration(
+        color: AppTheme.red.withValues(alpha: 0.06),
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: AppTheme.red.withValues(alpha: 0.3)),
+      ),
+      child: const Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Row(children: [
+          Icon(Icons.shield, size: 15, color: AppTheme.red),
+          SizedBox(width: 7),
+          Text('YouTube bot-check', style: TextStyle(fontWeight: FontWeight.w800, fontSize: 12.5, color: AppTheme.red)),
+        ]),
+        SizedBox(height: 5),
+        Text('This video wants sign-in even from your network. Retry later from home Wi-Fi — no cookies are used or needed here.',
+            style: TextStyle(fontSize: 11.5, height: 1.35, color: Colors.grey)),
+      ]),
+    );
   }
 
   static String _fmtBytes(int b) => fmtBytes(b);
+
+  String _liveJson() {
+    final status = _dlErr != null ? 'error' : (_localPath != null ? 'done' : 'running');
+    final est = _format?.estimatedSize ?? 0;
+    final got = (est * _progress).round();
+    return '{\n'
+        '  "status": "$status",\n'
+        '  "phase": "${_phase.replaceAll('"', "'")}",\n'
+        '  "percent": ${(_progress * 100).toStringAsFixed(1)},\n'
+        '  "mb": ${(got / 1048576).toStringAsFixed(1)},\n'
+        '  "size_bytes": $got,\n'
+        '  "quality": "${_format?.label ?? ''}",\n'
+        '  "local": "${_localPath ?? ''}"\n'
+        '}';
+  }
 }
