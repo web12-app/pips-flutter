@@ -104,13 +104,8 @@ jobs:
             if [ -z "$RID" ]; then echo "release id missing"; sleep 20; continue; fi
             echo "release id: $RID"
             # drop a stale asset with the same name (overwrite)
-            for AID in $(curl -sf -H "Authorization: token $GITHUB_TOKEN" "https://api.github.com/repos/$REPO/releases/$RID/assets" \
-              | python3 -c "
-import json,sys
-try:
-    for a in json.load(sys.stdin):
-        if a.get('name') == '$APK': print(a['id'])
-except Exception: pass"); do
+            ASSETS=$(curl -sf -H "Authorization: token $GITHUB_TOKEN" "https://api.github.com/repos/$REPO/releases/$RID/assets" || echo "[]")
+            for AID in $(echo "$ASSETS" | python3 -c "import json,sys; d=json.load(sys.stdin); print(' '.join(str(a['id']) for a in (d if isinstance(d, list) else []) if a.get('name') == '$APK'))"); do
               echo "deleting stale asset $AID"
               curl -sf -X DELETE -H "Authorization: token $GITHUB_TOKEN" "https://api.github.com/repos/$REPO/releases/assets/$AID" || true
               sleep 2
