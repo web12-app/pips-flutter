@@ -484,17 +484,17 @@ String fmtCompact(int n) {
 /// so a long feed never saturates the network.
 
 final Map<String, Uint8List?> _frameCache = {}; // videoId -> frame bytes (null = tried & failed)
-final Map<String, Future<Uint8List?>> _frameJobs = {}; // in-flight dedup
+final Map<String, Completer<Uint8List?>> _frameWaiters = {}; // in-flight dedup (by videoId)
 final List<String> _frameWait = []; // FIFO waiting queue
 int _frameActive = 0;
 const int _kMaxFrameExtracts = 2;
 
 Future<Uint8List?> _firstFrame(String videoId) {
   if (_frameCache.containsKey(videoId)) return Future.value(_frameCache[videoId]);
-  final running = _frameJobs[videoId];
-  if (running != null) return running;
+  final w = _frameWaiters[videoId];
+  if (w != null) return w.future;
   final c = Completer<Uint8List?>();
-  _frameJobs[videoId] = c.future;
+  _frameWaiters[videoId] = c;
   _frameWait.add(videoId);
   _pumpFrames();
   return c.future;
@@ -503,7 +503,7 @@ Future<Uint8List?> _firstFrame(String videoId) {
 void _pumpFrames() {
   while (_frameActive < _kMaxFrameExtracts && _frameWait.isNotEmpty) {
     final id = _frameWait.removeAt(0);
-    final c = _frameJobs[id];
+    final c = _frameWaiters.remove(id);
     if (c == null) continue;
     _frameActive++;
     () async {
@@ -519,7 +519,6 @@ void _pumpFrames() {
         bytes = null;
       }
       _frameCache[id] = bytes;
-      _frameJobs.remove(id);
       _frameActive--;
       if (!c.isCompleted) c.complete(bytes);
       _pumpFrames();
