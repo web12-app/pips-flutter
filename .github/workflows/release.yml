@@ -9,7 +9,7 @@ on:
 jobs:
   build:
     runs-on: ubuntu-22.04
-    timeout-minutes: 45
+    timeout-minutes: 90
     permissions:
       contents: write
     steps:
@@ -21,8 +21,9 @@ jobs:
           path: |
             ~/.gradle/caches
             ~/.gradle/wrapper
-          key: gradle-${{ runner.os }}-${{ hashFiles('pubspec.lock', 'android/**', '.github/workflows/release.yml') }}
+          key: gradle-v2-${{ runner.os }}-${{ hashFiles('pubspec.lock', 'android/**', '.github/workflows/release.yml') }}
           restore-keys: |
+            gradle-v2-${{ runner.os }}-
             gradle-${{ runner.os }}-
 
       - uses: actions/setup-java@v4
