@@ -546,17 +546,6 @@ class _ChannelPageState extends State<ChannelPage> {
           Text(label, style: TextStyle(fontSize: 11, color: Colors.grey.shade600)),
         ]),
       );
-
-
-  Future<void> _delete() async {
-    final ok = await showDialog<bool>(context: context, builder: (ctx) => AlertDialog(title: Text('Delete "${widget.name}"?'), actions: [TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')), FilledButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('Delete'))]));
-    if (ok == true) {
-      try {
-        await PipsApi.channelDelete(widget.id);
-        if (mounted) Navigator.pop(context);
-      } on ApiException catch (e) { if (mounted) toast(context, e.message); }
-    }
-  }
 }
 
 /// Bottom sheet: upload a video from the device (with a title) straight into
