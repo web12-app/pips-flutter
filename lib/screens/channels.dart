@@ -1530,7 +1530,9 @@ class _VideoOptionsSheetState extends State<VideoOptionsSheet> {
           color: AppTheme.purple,
           label: 'Change poster (custom thumbnail)',
           trailing: busy ? const SizedBox(width: 15, height: 15, child: CircularProgressIndicator(strokeWidth: 2)) : null,
-          onTap: busy ? null : _changePoster,
+          onTap: () {
+            if (!busy) _changePoster();
+          },
         ),
         SheetTile(
           icon: widget.locked ? Icons.lock_open : Icons.lock_outline,
