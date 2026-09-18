@@ -347,11 +347,6 @@ class _ReelTileState extends State<_ReelTile> {
     showSheet(context, _ReelCommentsSheet(fileId: it.e.id));
   }
 
-  String get _webChannelLabel {
-    final n = it.channelName.isNotEmpty ? it.channelName : (it.channelOwner.isNotEmpty ? '@${it.channelOwner}' : 'Pips');
-    return n;
-  }
-
   @override
   Widget build(BuildContext context) {
     final vc = _vc;
