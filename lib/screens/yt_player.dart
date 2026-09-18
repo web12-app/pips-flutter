@@ -31,6 +31,8 @@ class ChanItem {
   final int likes;
   final int dislikes;
   final String? myVote;
+  final String kind; // 'video' | 'reel' | 'post'
+  final bool adultOnly; // channel is 18+ — needs age confirmation
   ChanItem({
     required this.e,
     required this.title,
@@ -46,6 +48,8 @@ class ChanItem {
     this.likes = 0,
     this.dislikes = 0,
     this.myVote,
+    this.kind = 'video',
+    this.adultOnly = false,
   });
 
   factory ChanItem.fromRaw(Map<String, dynamic> f) {
@@ -56,6 +60,7 @@ class ChanItem {
     final thumb = f['thumb'] is Map ? Map<String, dynamic>.from(f['thumb'] as Map) : <String, dynamic>{};
     final tid = (thumb['id'] ?? '').toString();
     final mv = (f['my_vote'] ?? '').toString();
+    final kd = (f['kind'] ?? 'video').toString();
     return ChanItem(
       e: e,
       title: t.isEmpty ? e.name : t,
@@ -71,10 +76,12 @@ class ChanItem {
       likes: f['likes'] is int ? f['likes'] as int : 0,
       dislikes: f['dislikes'] is int ? f['dislikes'] as int : 0,
       myVote: mv.isEmpty ? null : mv,
+      kind: kd == 'reel' ? 'reel' : (kd == 'post' ? 'post' : 'video'),
+      adultOnly: f['channel_adult_only'] == true,
     );
   }
 
-  ChanItem copyWith({String? thumbId, int? durationMs, int? views, int? likes, int? dislikes, String? myVote}) => ChanItem(
+  ChanItem copyWith({String? thumbId, int? durationMs, int? views, int? likes, int? dislikes, String? myVote, String? kind, bool? adultOnly}) => ChanItem(
         e: e,
         title: title,
         addedAt: addedAt,
@@ -89,6 +96,8 @@ class ChanItem {
         likes: likes ?? this.likes,
         dislikes: dislikes ?? this.dislikes,
         myVote: myVote ?? this.myVote,
+        kind: kind ?? this.kind,
+        adultOnly: adultOnly ?? this.adultOnly,
       );
 }
 
@@ -221,6 +230,8 @@ class _ChannelVideoPageState extends State<ChannelVideoPage> with WidgetsBinding
       likes: curLikes,
       dislikes: curDislikes,
       myVote: curMyVote,
+      kind: it.kind,
+      adultOnly: it.adultOnly,
     );
   }
 

@@ -98,7 +98,7 @@ class PipsApi {
 
   static Map<String, String> get _headers => {
         if (session != null && session!.isNotEmpty) 'Cookie': 'pips_session=$session',
-        'User-Agent': 'PipsApp/3.24 (Flutter)',
+        'User-Agent': 'PipsApp/3.25 (Flutter)',
       };
 
   static Map<String, String> get authHeaders => _headers;
@@ -372,11 +372,14 @@ class PipsApi {
       });
   static Future<Map<String, dynamic>> channelPatch(String cid, Map<String, dynamic> changes) => _req('PATCH', '$api/channels/${enc(cid)}', changes);
   static Future<void> channelDelete(String cid) => _req('DELETE', '$api/channels/${enc(cid)}');
-  static Future<Map<String, dynamic>> channelAddFile(String cid, String fileId, [String title = '', String description = '', String? thumbFileId, int durationMs = 0]) =>
+  /// kind = 'video' | 'reel' | 'post'. Posts are text + optional image —
+  /// they carry no media file (fileId empty, backend makes a synthetic id).
+  static Future<Map<String, dynamic>> channelAddFile(String cid, String fileId, [String title = '', String description = '', String? thumbFileId, int durationMs = 0, String kind = 'video']) =>
       _req('POST', '$api/channels/${enc(cid)}/files', {
-        'file_id': fileId,
+        if (fileId.isNotEmpty) 'file_id': fileId,
         'title': title,
         'description': description,
+        'kind': kind,
         if (thumbFileId != null && thumbFileId.isNotEmpty) 'thumb_file_id': thumbFileId,
         if (durationMs > 0) 'duration_ms': durationMs,
       });
@@ -421,8 +424,9 @@ class PipsApi {
     return r['files'] is List ? r['files'] : [];
   }
   /// YouTube-style home feed: newest videos across all public channels.
-  static Future<List<dynamic>> channelFeed([String q = '']) async {
-    final r = await _req('GET', '$api/channels/feed?q=${enc(q)}');
+  /// kind = 'video' (default) | 'reel' | 'post' | 'all'.
+  static Future<List<dynamic>> channelFeed([String q = '', String kind = 'video']) async {
+    final r = await _req('GET', '$api/channels/feed?q=${enc(q)}&kind=${enc(kind)}');
     return r['videos'] is List ? r['videos'] : [];
   }
 

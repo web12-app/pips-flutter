@@ -8,6 +8,7 @@ import 'chat.dart';
 import 'misc.dart';
 import 'channels.dart';
 import 'uploads.dart';
+import 'reels.dart';
 import 'yt_player.dart';
 
 /// Home — greeting header, storage, recent files & folders, activity, quick actions.
@@ -19,6 +20,15 @@ class OverviewPage extends StatefulWidget {
 
 class _OverviewPageState extends State<OverviewPage> {
   Key refresh = UniqueKey();
+  bool _adultOk = false;
+
+  @override
+  void initState() {
+    super.initState();
+    adultConfirmed().then((v) {
+      if (mounted) setState(() => _adultOk = v);
+    });
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -62,6 +72,8 @@ class _OverviewPageState extends State<OverviewPage> {
               _quickTabs(context),
               const SizedBox(height: 18),
               _videoFeed(),
+              const SizedBox(height: 18),
+              const ReelsShelf(),
               Text('Save with Pips', style: TextStyle(fontSize: 24, fontWeight: FontWeight.w800, color: hc.text1)),
               const SizedBox(height: 12),
               _recentCard(context, all),
@@ -114,17 +126,41 @@ class _OverviewPageState extends State<OverviewPage> {
 
   // ------------------------------------------------- YouTube-style video feed
   /// Newest videos from all PUBLIC channels — scroll and touch to watch.
+  /// 18+ channel videos stay hidden until the age is confirmed.
   Widget _videoFeed() => FutureBuilder<List<dynamic>>(
         future: PipsApi.channelFeed(),
         builder: (_, s) {
-          if (s.connectionState != ConnectionState.done) return const SizedBox.shrink();
+          if (s.connectionState != ConnectionState.done) {
+            // YouTube-style skeleton loading cards while the feed loads
+            return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              for (var i = 0; i < 3; i++) ...[
+                const SkeletonBox(height: 190, radius: 14),
+                const SizedBox(height: 9),
+                Row(children: [
+                  const SkeletonBox(width: 34, height: 34, radius: 17),
+                  const SizedBox(width: 10),
+                  Expanded(child: SkeletonBox(height: 14, radius: 7)),
+                ]),
+                const SizedBox(height: 16),
+              ],
+            ]);
+          }
           final raw = (s.data ?? []).map((x) => Map<String, dynamic>.from(x as Map)).toList();
           final items = <ChanItem>[];
           for (final f in raw) {
             final it = ChanItem.fromRaw(f);
-            if (it.e.id.isNotEmpty) items.add(it);
+            if (it.e.id.isNotEmpty) {
+              if (it.kind != 'video') continue; // home list = regular videos only
+              if (it.adultOnly && !_adultOk) continue; // 18+ hidden until age confirmed
+              items.add(it);
+            }
           }
-          if (items.isEmpty) return const SizedBox.shrink();
+          if (items.isEmpty) {
+            return const Padding(
+              padding: EdgeInsets.only(bottom: 6),
+              child: EmptyState(icon: '📺', text: 'No videos yet — add one from your channel.'),
+            );
+          }
           return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
             Row(children: [
               const Icon(Icons.smart_display_rounded, size: 20, color: AppTheme.red),
@@ -144,7 +180,7 @@ class _OverviewPageState extends State<OverviewPage> {
 
   Widget _feedCard(ChanItem it, List<ChanItem> items) {
     return GestureDetector(
-      onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => ChannelVideoPage(
+      onTap: () => gatedNav(context, it.adultOnly, () => Navigator.push(context, MaterialPageRoute(builder: (_) => ChannelVideoPage(
         video: it.e,
         videoTitle: it.title,
         channelId: it.channelId,
@@ -152,14 +188,26 @@ class _OverviewPageState extends State<OverviewPage> {
         channelOwner: it.channelOwner,
         channelLogoId: it.channelLogoId,
         related: items,
-      ))),
+      )))),
       child: Container(
         margin: const EdgeInsets.only(bottom: 14),
         child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
           // 16:9 thumbnail area (mock3) — real thumbnail + duration badge
           AspectRatio(
             aspectRatio: 16 / 9,
-            child: VideoThumb(thumbId: it.thumbId, videoId: it.e.id, durationMs: it.durationMs, fallbackBytes: it.e.size, radius: 14),
+            child: Stack(fit: StackFit.expand, children: [
+              VideoThumb(thumbId: it.thumbId, videoId: it.e.id, durationMs: it.durationMs, fallbackBytes: it.e.size, radius: 14),
+              if (it.adultOnly)
+                Positioned(
+                  left: 8,
+                  top: 8,
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                    decoration: BoxDecoration(color: AppTheme.red.withValues(alpha: 0.92), borderRadius: BorderRadius.circular(7)),
+                    child: const Text('18+', style: TextStyle(color: Colors.white, fontSize: 10.5, fontWeight: FontWeight.w800)),
+                  ),
+                ),
+            ]),
           ),
           const SizedBox(height: 9),
           Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
@@ -308,6 +356,7 @@ class _OverviewPageState extends State<OverviewPage> {
           physics: const BouncingScrollPhysics(),
           children: [
             _tab(context, Icons.add_circle_rounded, 'Upload', primary: true, onTap: () => showSheet(context, const UploadSheet())),
+            _tab(context, Icons.movie_filter_rounded, 'Reels', onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const ReelsPage()))),
             _tab(context, Icons.tv_rounded, 'Channels', onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const ChannelsPage()))),
             _tab(context, Icons.folder_rounded, 'Folders', onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const FoldersPage()))),
             _tab(context, Icons.explore_rounded, 'Explorer', onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const CloudExplorerPage()))),
