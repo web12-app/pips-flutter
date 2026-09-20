@@ -87,7 +87,7 @@ class _AuthScreenState extends State<AuthScreen> {
     } on ApiException catch (e) {
       setState(() => error = e.message);
     } catch (e) {
-      setState(() => error = 'GitHub sign-in failed. One-time setup: add pips-next.vercel.app to Firebase Authentication → Settings → Authorized domains. (${e.toString().split("(").first.trim()})');
+      setState(() => error = 'GitHub sign-in failed. One-time setup: add pips-next.antideploy.com to Firebase Authentication → Settings → Authorized domains. (${e.toString().split("(").first.trim()})');
     } finally {
       if (mounted) setState(() => ghBusy = false);
     }

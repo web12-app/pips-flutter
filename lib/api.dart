@@ -6,7 +6,7 @@ import 'package:http_parser/http_parser.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 /// Pips API client — Dart port of pips-android Api.java.
-/// Every endpoint of https://pips-next.vercel.app/api with the {ok}/{ok,data} envelopes.
+/// Every endpoint of https://pips-next.antideploy.com/api with the {ok}/{ok,data} envelopes.
 class ApiException implements Exception {
   final String message;
   final int status;
@@ -21,7 +21,7 @@ class Progress {
 }
 
 class PipsApi {
-  static const String base = 'https://pips-next.vercel.app';
+  static const String base = 'https://pips-next.antideploy.com';
   static const String api = '$base/api';
   static const int singleLimit = 4 * 1024 * 1024;
   static const int chunkSize = 2 * 1024 * 1024;
