@@ -771,7 +771,7 @@ class _ChannelVideoPageState extends State<ChannelVideoPage> with WidgetsBinding
   }
 
   /// Share the YouTube-style embeddable player link:
-  /// https://pips-next.antideploy.com/embedding/<file_id>
+  /// https://pipsx.netlify.app/embedding/<file_id>
   /// — paste the link into any browser (loads a URL preview in an
   /// iframe-ready page) or the <iframe> code into any page/WebView.
   /// Secure play: public, short-lived signed stream, no download.

@@ -8,7 +8,7 @@ import 'google.dart';
 ///
 /// firebase_auth has no native GitHub UI on Android, so we open a WebView that
 /// runs the standard Firebase JS **redirect** flow on
-/// https://pips-next.antideploy.com/github-auth.html — that page uses the exact
+/// https://pipsx.netlify.app/github-auth.html — that page uses the exact
 /// GitHub OAuth app configured in the Firebase console, then hands the
 /// verified GitHub email back to the app over the `pips-auth://` scheme.
 /// The verified email is bridged to a Pips account exactly like Google:
