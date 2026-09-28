@@ -16,6 +16,8 @@ class ProfilePage extends StatelessWidget {
   const ProfilePage({super.key});
 
   /// Switch to a previously logged-in account (instant, no re-login).
+  /// Cached data of the old account is cleared; the device fingerprint is
+  /// forwarded and the target account is alerted about this device.
   Future<void> _switchTo(BuildContext context, String user) async {
     try {
       await PipsApi.switchAccount(user);
@@ -23,6 +25,68 @@ class ProfilePage extends StatelessWidget {
     } on ApiException catch (e) {
       if (context.mounted) toast(context, e.message);
     }
+  }
+
+  /// Devices that have logged into this account — forget one to force a
+  /// new-device alert the next time it signs in.
+  Widget _devicesCard(BuildContext context) {
+    final hc = HomeColors.of(context);
+    return GlassCard(
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Row(children: [
+          const Icon(Icons.devices_outlined, size: 18, color: AppTheme.purple),
+          const SizedBox(width: 8),
+          Text('Devices', style: TextStyle(fontWeight: FontWeight.w800, fontSize: 14.5, color: hc.text1)),
+        ]),
+        FutureBuilder<List<dynamic>>(
+          future: PipsApi.devices(),
+          builder: (_, s) {
+            if (s.connectionState != ConnectionState.done) {
+              return const Padding(padding: EdgeInsets.only(top: 10), child: Center(child: SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2))));
+            }
+            final devs = s.data ?? [];
+            if (devs.isEmpty) {
+              return Padding(padding: const EdgeInsets.only(top: 6), child: Text('No devices recorded yet.', style: TextStyle(fontSize: 12.5, color: hc.text2)));
+            }
+            return Column(children: [
+              for (final d in devs.cast<Map<String, dynamic>>())
+                Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 4),
+                  child: Row(children: [
+                    const Icon(Icons.smartphone, size: 17),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                        Text(d['name'] ?? 'Unknown device', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 13.5, color: hc.text1)),
+                        Text('Last login ${d['last_login'] ?? '—'} · ${d['logins'] ?? 0} logins',
+                            style: TextStyle(fontSize: 11.5, color: hc.text2)),
+                      ]),
+                    ),
+                    if (d['current'] == true)
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                        decoration: BoxDecoration(color: AppTheme.blueSoft, borderRadius: BorderRadius.circular(99)),
+                        child: const Text('This device', style: TextStyle(fontSize: 10.5, fontWeight: FontWeight.w800, color: AppTheme.blue)),
+                      )
+                    else
+                      TextButton(
+                        onPressed: () async {
+                          try {
+                            await PipsApi.removeDevice(d['id']);
+                            if (context.mounted) toast(context, 'Device removed — it will be alerted again on next login.');
+                          } on ApiException catch (e) {
+                            if (context.mounted) toast(context, e.message);
+                          }
+                        },
+                        child: const Text('Remove', style: TextStyle(fontWeight: FontWeight.w800, fontSize: 12.5, color: AppTheme.red)),
+                      ),
+                  ]),
+                ),
+            ]);
+          },
+        ),
+      ]),
+    );
   }
 
   /// Log in a NEW account — after login the app switches to it automatically.
@@ -126,6 +190,8 @@ class ProfilePage extends StatelessWidget {
           valueListenable: accountsChanged,
           builder: (ctx, __, ___) => _accountsCard(ctx),
         ),
+        const SizedBox(height: 12),
+        _devicesCard(context),
         const SizedBox(height: 12),
         _planCard(context),
         const SizedBox(height: 12),

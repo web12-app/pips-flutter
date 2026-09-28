@@ -2,6 +2,7 @@ import 'dart:async';
 import 'package:firebase_auth/firebase_auth.dart' as fa;
 import 'package:flutter/material.dart';
 import '../api.dart';
+import '../device.dart';
 import '../services/github.dart';
 import '../services/google.dart';
 import '../widgets.dart';
@@ -41,9 +42,27 @@ class _AuthScreenState extends State<AuthScreen> {
   }
 
   void login() => _run(() async {
-        await PipsApi.login(userCtrl.text.trim(), passCtrl.text);
+        final j = await PipsApi.login(userCtrl.text.trim(), passCtrl.text);
+        final devName = (j['device'] is Map ? (j['device'] as Map)['name'] : null)?.toString();
         widget.onAuthed();
+        _loginDeviceAlert(devName ?? Device.name);
       });
+
+  /// Post-login alert: confirms which device this account was just opened on.
+  /// The same info also arrives as an in-app notification from the backend.
+  void _loginDeviceAlert(String deviceName) {
+    final ctx = context;
+    if (!ctx.mounted) return;
+    showDialog(
+      context: ctx,
+      builder: (d) => AlertDialog(
+        title: const Text('✅ Logged in'),
+        content: Text('Device: $deviceName\n\nThis login was recorded. '
+            'If you don\'t recognise this device, check Profile → Devices.'),
+        actions: [TextButton(onPressed: () => Navigator.pop(d), child: const Text('OK'))],
+      ),
+    );
+  }
 
   /// Firebase Google sign-in -> silent Pips login, else prefilled signup.
   Future<void> google() async {

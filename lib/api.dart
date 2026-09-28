@@ -3,7 +3,9 @@ import 'dart:convert';
 import 'dart:io';
 import 'package:http/http.dart' as http;
 import 'package:http_parser/http_parser.dart';
+import 'package:path_provider/path_provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'device.dart';
 
 /// Pips API client — Dart port of pips-android Api.java.
 /// Every endpoint of https://pipsx.netlify.app/api with the {ok}/{ok,data} envelopes.
@@ -21,11 +23,11 @@ class Progress {
 }
 
 class PipsApi {
-  /// Single public entry point — the Netlify site. Its edge middleware
-  /// proxies /api/* (and /embedding) to the FastAPI origin, so app traffic
-  /// never references the origin host directly. Sessions survive the host
-  /// switch: the origin verifies the same signed cookie.
-  static const String base = 'https://pipsx.netlify.app';
+  /// Single public entry point — the live Cloudflare Worker. It proxies
+  /// /api/* to the FastAPI origin, so app traffic never references the origin
+  /// host directly. Sessions survive the host switch: the origin verifies the
+  /// same signed cookie.
+  static const String base = 'https://pips-next.web12open.workers.dev';
   static const String api = '$base/api';
   static const int singleLimit = 4 * 1024 * 1024;
   static const int chunkSize = 2 * 1024 * 1024;
@@ -87,12 +89,51 @@ class PipsApi {
     }
   }
 
-  /// Instantly switch to a previously logged-in account (no re-login).
+  /// Switch to a previously logged-in account (no re-login).
+  ///
+  /// Security flow: the device fingerprint is kept and forwarded, but all
+  /// cached data of the previous account is cleared first — nothing from the
+  /// old account leaks into the new one. After switching, a heartbeat tells
+  /// the backend which device this account was just opened on (the account
+  /// gets an in-app alert with the device name).
   static Future<void> switchAccount(String user) async {
     final a = accounts.firstWhere((x) => x['username'] == user, orElse: () => const <String, String>{});
     if ((a['session'] ?? '').isEmpty) throw ApiException('Account not found on this device.', 0);
+    await clearLocalData();
     await _saveSession(a['session'], user);
+    try { await heartbeat(); } catch (_) { /* best effort */ }
   }
+
+  /// Clear cached/temp data on account switch. The device fingerprint and the
+  /// saved session list survive (SharedPreferences keys are preserved).
+  static Future<void> clearLocalData() async {
+    try {
+      final tmp = await getTemporaryDirectory();
+      if (tmp.existsSync()) {
+        for (final e in tmp.listSync()) {
+          try { e.deleteSync(recursive: true); } catch (_) {}
+        }
+      }
+    } catch (_) {}
+    try {
+      final cache = await getApplicationCacheDirectory();
+      if (cache.existsSync()) {
+        for (final e in cache.listSync()) {
+          try { e.deleteSync(recursive: true); } catch (_) {}
+        }
+      }
+    } catch (_) {}
+  }
+
+  /// Tell the backend this device is now active on the current account
+  /// (called on login & account switch). Returns the device record.
+  static Future<Map<String, dynamic>> heartbeat() => _req('POST', '$api/device/heartbeat', {});
+
+  /// Devices that have logged into the current account.
+  static Future<List<dynamic>> devices() async => (await _req('GET', '$api/account/devices'))['devices'] as List? ?? [];
+
+  /// Forget a device from the current account.
+  static Future<void> removeDevice(String id) => _req('POST', '$api/account/devices/remove', {'id': id});
 
   /// Remove a saved account from the switcher (its session is discarded).
   static Future<void> removeAccount(String user) async {
@@ -100,9 +141,12 @@ class PipsApi {
     await _persistAccounts();
   }
 
+  /// Device fingerprint headers (X-Device-Id / X-Device-Name) go on every
+  /// request — the backend uses them for login alerts & the device list.
   static Map<String, String> get _headers => {
         if (session != null && session!.isNotEmpty) 'Cookie': 'pips_session=$session',
         'User-Agent': 'PipsApp/3.25 (Flutter)',
+        ...Device.headers,
       };
 
   static Map<String, String> get authHeaders => _headers;
@@ -169,7 +213,9 @@ class PipsApi {
   // ---------------------------------------------------------------- auth
   static Future<Map<String, dynamic>> me() => _req('GET', '$api/me');
 
-  static Future<void> login(String user, String pass) async {
+  /// Returns the login response JSON — includes the tracked `device` record
+  /// so the UI can alert "logged in on <device name>".
+  static Future<Map<String, dynamic>> login(String user, String pass) async {
     final resp = await http.post(Uri.parse('$api/login'),
         headers: {..._headers, 'Content-Type': 'application/json'},
         body: jsonEncode({'username': user, 'password': pass}));
@@ -177,6 +223,7 @@ class PipsApi {
     final cookie = _extractSession(resp.headers['set-cookie'] ?? '');
     if (cookie == null) throw ApiException('No session returned — try again.', 0);
     await _saveSession(cookie, user.toLowerCase());
+    return _json(resp.body);
   }
 
   static String? _extractSession(String setCookie) {

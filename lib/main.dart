@@ -3,6 +3,7 @@ import 'package:firebase_core/firebase_core.dart';
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'api.dart';
+import 'device.dart';
 import 'firebase_options.dart';
 import 'mini_player.dart';
 import 'services/notifications.dart';
@@ -103,6 +104,7 @@ void main() async {
     // Firebase is optional at launch — never block app start if it fails.
   }
   await PipsNotify.i.init();
+  await Device.init(); // device fingerprint — must exist before any API call
   await PipsApi.loadSession();
   try {
     final p = await SharedPreferences.getInstance();
