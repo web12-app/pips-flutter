@@ -33,13 +33,17 @@ class Device {
     try {
       final plugin = DeviceInfoPlugin();
       if (Platform.isAndroid) {
-        final a = await plugin.androidInfo;
-        final rel = (a.version.release ?? '').isEmpty ? '' : ' (Android ${a.version.release})';
-        return '${a.brand} ${a.model}$rel'.trim();
+        // dynamic: field nullability changed across device_info_plus versions;
+        // dynamic dispatch keeps this warning-free on all of them.
+        final dynamic a = await plugin.androidInfo;
+        final rel = (a.version.release ?? '').toString();
+        final base = '${a.brand} ${a.model}'.trim();
+        return rel.isEmpty ? base : '$base (Android $rel)';
       }
       if (Platform.isIOS) {
-        final i = await plugin.iosInfo;
-        return i.name.isNotEmpty ? i.name : i.model ?? 'iPhone';
+        final dynamic i = await plugin.iosInfo;
+        final name = (i.name ?? '').toString();
+        return name.isNotEmpty ? name : (i.model ?? 'iPhone').toString();
       }
       if (Platform.isWindows || Platform.isMacOS || Platform.isLinux) {
         final d = await plugin.deviceInfo;
